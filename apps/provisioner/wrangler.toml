@@ -1,0 +1,21 @@
+name = "msiaas-provisioner"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+compatibility_flags = [ "nodejs_compat" ]
+
+# D1データベースのバインディング
+[[d1_databases]]
+binding = "DB"
+database_name = "msiaas-db"
+database_id = "msiaas-db"
+
+# Queue コンシューマーの設定
+[[queues.consumers]]
+queue = "msiaas-provisioning-jobs"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 3
+dead_letter_queue = "msiaas-provisioning-dlq"
+
+[dev]
+port = 8788

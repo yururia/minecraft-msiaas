@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "../../",
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "types": ["@cloudflare/workers-types", "node"],
+    "skipLibCheck": true,
+    "noImplicitAny": false
+  },
+  "include": [
+    "src/**/*",
+    "../api/src/**/*",
+    "../provisioner/src/**/*"
+  ]
+}

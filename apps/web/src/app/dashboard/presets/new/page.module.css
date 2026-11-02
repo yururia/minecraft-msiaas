@@ -1,0 +1,99 @@
+.formContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.label {
+  font-family: 'DotGothic16', sans-serif;
+  color: #1a4f0b; /* Deep rich fresh green */
+  font-size: 1.1rem;
+  letter-spacing: 0.05em;
+  font-weight: bold;
+}
+
+.input, .select {
+  background-color: rgba(18, 20, 26, 0.88);
+  border: 4px solid #585858;
+  border-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='6'><rect x='2' y='2' width='2' height='2' fill='%23585858'/></svg>") 2 repeat;
+  color: #ffffff;
+  padding: 0.85rem 1.25rem;
+  font-family: 'DotGothic16', monospace !important;
+  font-size: 1rem;
+  box-shadow: 
+    inset 2px 2px 4px rgba(0, 0, 0, 0.8),
+    inset -1px -1px 0px rgba(255, 255, 255, 0.1);
+  outline: none;
+  transition: all var(--transition-fast);
+  border-radius: 0 !important;
+}
+
+.input:focus, .select:focus {
+  border-color: #ffffff;
+  border-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='6'><rect x='2' y='2' width='2' height='2' fill='%23ffffff'/></svg>") 2 repeat;
+  background-color: rgba(0, 0, 0, 0.98);
+}
+
+.searchBox {
+  margin-top: 2rem;
+  padding-top: 2.5rem;
+  border-top: 4px dashed rgba(0, 0, 0, 0.15);
+}
+
+.searchBox h3 {
+  color: #2b1e13; /* Warm Oak Brown */
+  font-size: 1.3rem;
+  margin-bottom: 1.2rem;
+  font-family: 'DotGothic16', sans-serif;
+}
+
+.modList {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.2rem;
+  margin-top: 1.75rem;
+}
+
+.modItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  background-color: rgba(0, 0, 0, 0.04);
+  padding: 1.2rem 1.5rem;
+  border: 4px solid #555555;
+  border-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='6'><rect x='2' y='2' width='2' height='2' fill='%23555555'/></svg>") 2 repeat;
+  box-shadow: 
+    inset 2px 2px 4px rgba(0, 0, 0, 0.25),
+    inset -2px -2px 0px rgba(255, 255, 255, 0.8);
+  border-radius: 0 !important;
+}
+
+.modInfo {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.modInfo h4 {
+  font-family: 'DotGothic16', sans-serif;
+  color: #1f2937;
+  font-size: 1.15rem;
+  margin-bottom: 0.4rem;
+  font-weight: bold;
+}
+
+.modDesc {
+  font-size: 0.9rem;
+  color: #4b5563;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-weight: 500;
+}
+
+

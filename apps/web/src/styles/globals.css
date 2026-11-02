@@ -1,0 +1,211 @@
+@import url('https://fonts.googleapis.com/css2?family=DotGothic16&family=VT323&family=Inter:wght@300;400;500;600;700&display=swap');
+
+:root {
+  /* Color Palette - Shader Mod Inspired (Bright & Clear) */
+  --color-minecraft-grass: #7ebb41;      /* Bright Fresh Grass Green */
+  --color-minecraft-grass-light: #a3d95d;/* Sunlit Grass Green (Hover) */
+  --color-minecraft-grass-dark: #5c8e32; /* Shaded Grass Green */
+  
+  --color-minecraft-dirt: #b88a5b;       /* Clean Warm Oak Brown */
+  --color-minecraft-dirt-dark: #866043;  /* Rich Soil Brown */
+  --color-minecraft-dirt-light: #d3a473; /* Light Sunlit Oak / Wheat */
+  
+  --color-minecraft-stone: #a3a3a3;      /* Clean Stone Brick Grey */
+  --color-minecraft-stone-light: #d4d4d4;/* Lit Stone Brick Grey */
+  --color-minecraft-stone-dark: #737373; /* Shaded Stone Brick Grey */
+  
+  --color-minecraft-gold: #ffcf40;       /* Luminous Lantern Gold (Yellow) */
+  --color-minecraft-redstone: #ff5555;   /* Luminous Redstone (Red) */
+  --color-minecraft-emerald: #55ff55;    /* Luminous Emerald (Green) */
+  --color-minecraft-diamond: #55ffff;    /* Luminous Diamond (Aqua) */
+  
+  /* Layout variables mapping - Bright, clean and high contrast */
+  --color-bg: #eaf6ff; /* Soft sky blue fallback */
+  --color-text-primary: #12141a; /* Dark readable text for bright theme */
+  --color-text-secondary: #4a5568;
+  
+  --color-accent-primary: var(--color-minecraft-grass);
+  --color-accent-hover: var(--color-minecraft-grass-light);
+  
+  --color-success: #2f855a;
+  --color-danger: #c53030;
+  --color-warning: #c05621;
+
+  /* Glassmorphism -> Shader Mod Translucent Panels (Optimized for Dirt background contrast) */
+  --glass-bg: rgba(255, 255, 255, 0.88);
+  --glass-border: rgba(255, 255, 255, 0.75);
+  --glass-shadow: 0 12px 48px rgba(0, 0, 0, 0.35);
+  
+  --radius-md: 0px; /* Minecraft is strictly square! */
+  --radius-lg: 0px;
+  --radius-full: 0px;
+  
+  --transition-fast: 0.15s cubic-bezier(0.25, 0.8, 0.25, 1);
+  --transition-normal: 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  /* Disable rounded borders for Minecraft look */
+  border-radius: 0 !important;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: #3b291d; /* Fallback classic dirt brown */
+  /* Layered real classic Minecraft backgrounds: Top grass-transition + Infinite soil underneath */
+  background-image: 
+    url('/images/minecraft_background.svg'), /* Layer 1: Actual extracted grass block border (横リピート) */
+    url('/images/dirt.svg');                 /* Layer 2: Seamless underlying soil (全画面リピート) */
+  background-position: 
+    top left,
+    top left;
+  background-repeat: 
+    repeat-x,
+    repeat;
+  background-size: 
+    600px 240px, /* 50x20 grid scaled -> Exactly 12px per square pixel bit! */
+    192px 192px; /* 16x16 soil scaled to 192px -> Perfectly synchronizes to the same 12px pixel grid size! */
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background-attachment: fixed;
+  color: var(--color-text-primary);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* 8bit Titles - Refined with elegant premium 3D extruded block shadow like MINECON */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'DotGothic16', 'VT323', sans-serif;
+  font-weight: bold;
+  letter-spacing: 0.1em;
+  color: #12141a;
+}
+
+h1 {
+  font-size: 2.5rem;
+  color: #1a4f0b; /* Deep rich fresh green */
+  /* Beautiful 3D extruded layer shadow */
+  text-shadow: 
+    1px 1px 0px rgba(255, 255, 255, 0.9), 
+    2px 2px 0px rgba(92, 142, 50, 0.35), 
+    3px 3px 0px rgba(92, 142, 50, 0.25), 
+    4px 4px 0px rgba(92, 142, 50, 0.15),
+    5px 5px 8px rgba(0, 0, 0, 0.08);
+}
+
+h2 {
+  font-size: 1.9rem;
+  color: #2b1e13; /* Rich Oak Brown */
+  /* Wood-themed 3D extruded layer shadow */
+  text-shadow: 
+    1px 1px 0px rgba(255, 255, 255, 0.9), 
+    2px 2px 0px rgba(184, 138, 91, 0.4), 
+    3px 3px 0px rgba(184, 138, 91, 0.3), 
+    4px 4px 0px rgba(184, 138, 91, 0.2),
+    5px 5px 8px rgba(0, 0, 0, 0.08);
+}
+
+h3 {
+  font-size: 1.25rem;
+  text-shadow: 1px 1px 0px rgba(255, 255, 255, 0.8);
+}
+
+/* Premium 3D Extruded Badge/Tag inspired by the red LIVE block */
+.badge3d {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem 0.75rem;
+  font-family: 'DotGothic16', 'VT323', sans-serif;
+  font-weight: bold;
+  font-size: 0.9rem;
+  color: #ffffff;
+  background-color: #ef4444; /* Vivid Redstone Red */
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  box-shadow: 
+    inset 0 1px 0px rgba(255, 255, 255, 0.4),
+    0 4px 0px #b91c1c, /* 3D side block wall */
+    0 6px 12px rgba(0, 0, 0, 0.15);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-right: 0.5rem;
+  border-radius: 0 !important;
+}
+
+.badge3dSuccess {
+  background-color: var(--color-minecraft-grass);
+  box-shadow: 
+    inset 0 1px 0px rgba(255, 255, 255, 0.4),
+    0 4px 0px var(--color-minecraft-grass-dark),
+    0 6px 12px rgba(0, 0, 0, 0.15);
+}
+
+.badge3dGold {
+  background-color: var(--color-minecraft-gold);
+  color: #2b1e13;
+  box-shadow: 
+    inset 0 1px 0px rgba(255, 255, 255, 0.5),
+    0 4px 0px #d97706,
+    0 6px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Scrollbar in clean pixel art style */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(4px);
+  border-left: 2px solid rgba(0, 0, 0, 0.05);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-minecraft-stone);
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  box-shadow: inset 1px 1px 0px var(--color-minecraft-stone-light), inset -1px -1px 0px var(--color-minecraft-stone-dark);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-minecraft-grass);
+  box-shadow: inset 1px 1px 0px var(--color-minecraft-grass-light), inset -1px -1px 0px var(--color-minecraft-grass-dark);
+}
+
+/* ========================================== */
+/* Pixel Border Utilities (NES/Minecraft Style) */
+/* ========================================== */
+
+/* Complete Pixel Border with 2px-slice SVG */
+.pixel-border {
+  border: 4px solid #000;
+  border-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='6'><rect x='2' y='2' width='2' height='2' fill='%23000000'/></svg>") 2 repeat;
+}
+
+/* Minecraft grey panel / button border */
+.pixel-border-minecraft {
+  border: 4px solid #585858;
+  border-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='6'><rect x='2' y='2' width='2' height='2' fill='%23585858'/></svg>") 2 repeat;
+  box-shadow: 
+    inset 2px 2px 0px #ffffff,
+    inset -2px -2px 0px #555555;
+}
+
+/* Minecraft slots (pressed/sunken effect) */
+.pixel-border-sunken {
+  border: 4px solid #555555;
+  border-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='6'><rect x='2' y='2' width='2' height='2' fill='%23555555'/></svg>") 2 repeat;
+  background-color: rgba(0, 0, 0, 0.4) !important;
+  box-shadow: 
+    inset 2px 2px 4px rgba(0, 0, 0, 0.6),
+    inset -2px -2px 0px rgba(255, 255, 255, 0.15);
+}
+
+
+

@@ -1,0 +1,148 @@
+.scene {
+  width: var(--size);
+  height: var(--size);
+  perspective: 800px;
+  display: inline-block;
+  user-select: none;
+  cursor: pointer;
+}
+
+.cubeWrapper {
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  animation: floatBobbing 5s ease-in-out infinite;
+}
+
+/* Base 3D rotation representing Minecraft perspective */
+.cube {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  transform-style: preserve-3d;
+  transform: rotateX(-25deg) rotateY(45deg);
+  transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Hover: spin smoothly, lift up, and scale */
+.scene:hover .cube {
+  transform: rotateX(-20deg) rotateY(225deg) scale3d(1.12, 1.12, 1.12);
+}
+
+.face {
+  position: absolute;
+  width: var(--size);
+  height: var(--size);
+  background-size: cover;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  box-shadow: inset 0 0 16px rgba(0, 0, 0, 0.2);
+  transition: filter 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* Transform for each side of the cube */
+.top {
+  transform: rotateX(90deg) translateZ(var(--half-size));
+}
+.bottom {
+  transform: rotateX(-90deg) translateZ(var(--half-size));
+  filter: brightness(0.4);
+}
+.front {
+  transform: rotateY(0deg) translateZ(var(--half-size));
+  filter: brightness(0.85);
+}
+.back {
+  transform: rotateY(180deg) translateZ(var(--half-size));
+  filter: brightness(0.75);
+}
+.left {
+  transform: rotateY(-90deg) translateZ(var(--half-size));
+  filter: brightness(0.75);
+}
+.right {
+  transform: rotateY(90deg) translateZ(var(--half-size));
+  filter: brightness(0.9);
+}
+
+/* Hover highlight effect on faces */
+.scene:hover .face {
+  box-shadow: 
+    inset 0 0 0 1px rgba(255, 255, 255, 0.15),
+    inset 0 0 24px rgba(255, 255, 255, 0.05);
+}
+
+/* ==========================================
+   BLOCK TYPE 1: GRASS BLOCK (Emerald / Green Theme)
+   ========================================== */
+.grass .top {
+  background-image: url('/images/grass_top.svg?v=2');
+}
+
+.grass .bottom {
+  background-image: url('/images/dirt.svg?v=2');
+}
+
+.grass .front,
+.grass .back,
+.grass .left,
+.grass .right {
+  background-image: url('/images/grass_side.svg?v=2');
+}
+
+/* ==========================================
+   BLOCK TYPE 2: STONE BLOCK (Redstone Ore Accent)
+   ========================================== */
+.stone .face {
+  background-image: url('/images/redstone_ore.svg');
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.stone .face {
+  animation: redstonePulse 3s ease-in-out infinite alternate;
+}
+
+/* ==========================================
+   BLOCK TYPE 3: OBSIDIAN BLOCK (Diamond Ore Accent)
+   ========================================== */
+.obsidian .face {
+  background-image: url('/images/diamond_ore.svg');
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.obsidian .face {
+  animation: diamondPulse 4s ease-in-out infinite alternate;
+}
+
+/* ==========================================
+   ANIMATIONS
+   ========================================== */
+@keyframes floatBobbing {
+  0% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-8px) rotate(1deg);
+  }
+  100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+}
+
+@keyframes redstonePulse {
+  0% {
+    filter: brightness(1.0) drop-shadow(0 0 1px rgba(239, 68, 68, 0.2));
+  }
+  100% {
+    filter: brightness(1.2) drop-shadow(0 0 4px rgba(239, 68, 68, 0.8));
+  }
+}
+
+@keyframes diamondPulse {
+  0% {
+    filter: brightness(0.95) drop-shadow(0 0 1px rgba(6, 182, 212, 0.2));
+  }
+  100% {
+    filter: brightness(1.15) drop-shadow(0 0 6px rgba(6, 182, 212, 0.9));
+  }
+}

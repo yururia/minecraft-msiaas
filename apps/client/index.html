@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Minecraft MSIaaS Client</title>
+    <style>
+      :root {
+        font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+        color-scheme: dark;
+        background-color: #0b0c10;
+        color: #f0f0f5;
+      }
+      body {
+        margin: 0;
+        display: flex;
+        place-items: center;
+        min-width: 320px;
+        min-height: 100vh;
+      }
+      #app {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 2rem;
+        text-align: center;
+      }
+      .card {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 2rem;
+        margin-top: 2rem;
+      }
+      button {
+        border-radius: 8px;
+        border: 1px solid transparent;
+        padding: 0.6em 1.2em;
+        font-size: 1em;
+        font-weight: 500;
+        font-family: inherit;
+        background-color: #6366f1;
+        color: white;
+        cursor: pointer;
+        transition: border-color 0.25s;
+        margin: 0.5rem;
+      }
+      button:hover {
+        background-color: #818cf8;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <h1>Minecraft MSIaaS</h1>
+      <p>サーバーに安全に接続し、MODを自動同期します。</p>
+      
+      <div class="card">
+        <h3 id="status">待機中...</h3>
+        <button id="btn-sync">MODを同期する</button>
+        <button id="btn-tunnel">Tunnelで接続する</button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

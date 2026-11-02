@@ -1,0 +1,44 @@
+.container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 2; /* Sits above background, below the content cards */
+}
+
+.ember {
+  position: absolute;
+  bottom: -20px;
+  background-color: var(--ember-color, #a3d95d);
+  border-radius: 2px; /* Pixel-art style instead of circle */
+  filter: blur(1px);
+  box-shadow: 
+    0 0 6px var(--ember-color, #a3d95d), 
+    0 0 12px var(--ember-glow, rgba(163, 217, 93, 0.4));
+  animation: floatUp linear infinite;
+  transform: translateY(0) translateX(0);
+}
+
+@keyframes floatUp {
+  0% {
+    transform: translateY(0) translateX(0);
+    opacity: 0;
+  }
+  10% {
+    opacity: var(--base-opacity, 0.45);
+  }
+  50% {
+    /* Gentle swaying movement */
+    transform: translateY(-50vh) translateX(30px);
+  }
+  90% {
+    opacity: var(--base-opacity, 0.45);
+  }
+  100% {
+    transform: translateY(-110vh) translateX(-20px);
+    opacity: 0;
+  }
+}

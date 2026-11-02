@@ -1,0 +1,27 @@
+{
+  "name": "@msiaas/sandbox",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev src/index.ts",
+    "build": "tsc",
+    "simulate": "npx tsx src/index.ts",
+    "deploy": "wrangler deploy",
+    "lint": "eslint \"src/**/*.ts\""
+  },
+  "dependencies": {
+    "@msiaas/api": "workspace:*",
+    "@msiaas/cloud-provider": "workspace:*",
+    "@msiaas/provisioner": "workspace:*",
+    "@msiaas/shared": "workspace:*",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261023.1",
+    "@types/jszip": "^3.4.1",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.3",
+    "wrangler": "^4.156.0"
+  }
+}

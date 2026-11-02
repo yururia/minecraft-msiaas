@@ -1,0 +1,22 @@
+{
+  "name": "@msiaas/provisioner",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "tsc",
+    "deploy": "wrangler deploy",
+    "lint": "eslint \"src/**/*.ts\""
+  },
+  "dependencies": {
+    "@msiaas/cloud-provider": "workspace:*",
+    "@msiaas/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261023.1",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.3",
+    "wrangler": "^4.156.0"
+  }
+}

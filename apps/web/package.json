@@ -1,0 +1,28 @@
+{
+  "name": "@msiaas/web",
+  "version": "0.1.0",
+  "private": true,
+  "main": "electron-main.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "electron:dev": "concurrently \"next dev\" \"wait-on http://localhost:3000 && electron .\""
+  },
+  "dependencies": {
+    "@msiaas/shared": "workspace:*",
+    "jszip": "^3.10.1",
+    "next": "14.1.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "@types/react": "^18.2.0",
+    "@types/node": "^20.0.0",
+    "electron": "^28.2.0",
+    "concurrently": "^8.2.2",
+    "wait-on": "^7.2.0"
+  }
+}

@@ -1,0 +1,29 @@
+name = "msiaas-api"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+compatibility_flags = [ "nodejs_compat" ]
+
+# D1 Database Binding
+[[d1_databases]]
+binding = "DB"
+database_name = "msiaas-db"
+database_id = "00000000-0000-0000-0000-000000000000" # Production ID is required but unused in local dev
+migrations_dir = "../../infra/d1"
+
+# Queue Producer (for Provisioner)
+[[queues.producers]]
+binding = "PROVISIONING_QUEUE"
+queue = "msiaas-provisioning-jobs"
+
+# Environment Variables
+# Secrets (register via `wrangler secret put`):
+# - CURSEFORGE_API_KEY
+[vars]
+ENVIRONMENT = "dev"
+CACHE_BUSTER = "2026-05-26T21:34:44"
+
+[triggers]
+crons = ["0 3 * * *", "*/5 * * * *"]
+
+[dev]
+port = 8787

@@ -1,0 +1,2 @@
+# Cloudflare Worker Environment Secrets
+CURSEFORGE_API_KEY=your_curseforge_api_key_here

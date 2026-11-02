@@ -1,0 +1,79 @@
+#cloud-config
+# 仮想マシンのプロビジョニング時に実行される cloud-init テンプレート
+
+users:
+  - default
+  - name: msiaas
+    groups: [docker]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+  - jq
+  - unzip
+
+write_files:
+  - path: /opt/msiaas/bootstrap.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      echo "[Bootstrap] Starting Minecraft MSIaaS initialization..."
+      
+      # 環境変数としてプロビジョニングシステムから注入される想定
+      # $MINECRAFT_MEMORY : 例 "8G"
+      # $TUNNEL_TOKEN : 例 "eyJh..."
+      
+      mkdir -p /opt/msiaas/minecraft
+      cd /opt/msiaas/minecraft
+
+      echo "[Bootstrap] Installing Cloudflared..."
+      curl -L 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64' -o cloudflared
+      chmod +x cloudflared
+      
+      # トンネルの起動
+      if [ -n "$TUNNEL_TOKEN" ]; then
+        ./cloudflared service install $TUNNEL_TOKEN
+      fi
+
+      echo "[Bootstrap] Creating docker-compose.yml..."
+      cat << EOF > docker-compose.yml
+      version: '3.8'
+      services:
+        mc:
+          image: itzg/minecraft-server
+          container_name: msiaas_mc
+          environment:
+            EULA: "TRUE"
+            TYPE: "FORGE"
+            VERSION: "1.20.1"
+            MEMORY: "${MINECRAFT_MEMORY:-4G}"
+          ports:
+            - "25565:25565"
+          volumes:
+            - ./data:/data
+          restart: unless-stopped
+      EOF
+
+      echo "[Bootstrap] Starting Docker container..."
+      docker compose up -d
+      echo "[Bootstrap] Initialization complete!"
+
+runcmd:
+  # 1. Docker のインストール
+  - curl -fsSL https://get.docker.com -o get-docker.sh
+  - sh get-docker.sh
+  - systemctl enable docker
+  - systemctl start docker
+
+  # 2. 埋め込んだブートストラップスクリプトの実行
+  # user-data経由で渡された環境変数を展開して実行する
+  - bash -c 'source /etc/environment && /opt/msiaas/bootstrap.sh'

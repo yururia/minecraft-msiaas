@@ -1,0 +1,19 @@
+{
+  "name": "@msiaas/shared",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc -w",
+    "lint": "eslint \"src/**/*.ts\""
+  },
+  "dependencies": {
+    "zod": "^3.23.8",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "@types/jszip": "^3.4.1"
+  }
+}
