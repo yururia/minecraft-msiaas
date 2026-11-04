@@ -1,10 +1,35 @@
 import { Hono } from 'hono';
-import { Bindings } from '../index';
+import { z } from 'zod';
+import { Bindings, Variables } from '../index';
 import { CloudManager } from '@msiaas/cloud-provider';
 import { ServerSessionResponse } from '@msiaas/shared';
 
-const serversApp = new Hono<{ Bindings: Bindings, Variables: { user: any } }>();
+const serversApp = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 const cloudManager = new CloudManager();
+
+const launchSchema = z.object({
+  presetId: z.string().min(1, 'Preset ID is required.'),
+});
+
+const sessionUpdateSchema = z.object({
+  sessionId: z.string().min(1, 'Session ID is required.'),
+  status: z.enum([
+    'queued',
+    'provisioning',
+    'fallback',
+    'running',
+    'warning_sent',
+    'stopping',
+    'stopped',
+    'failed',
+  ]),
+  ipAddress: z.string().nullable().optional(),
+  instanceId: z.string().nullable().optional(),
+  cloudProvider: z.enum(['local', 'oracle', 'aws']).optional(),
+  javaPid: z.number().int().positive().nullable().optional(),
+  serverDataDir: z.string().nullable().optional(),
+  reason: z.string().max(255).optional(),
+});
 
 function mapSessionToResponse(session: any): ServerSessionResponse {
   let providerInfo = 'PROVISIONING...';
@@ -37,7 +62,6 @@ serversApp.get('/active', async (c) => {
   const db = c.env.DB;
 
   try {
-    // 1. アクティブなセッションを1件取得
     const session = await db.prepare(`
       SELECT s.*, p.name as preset_name, p.mc_version, p.loader, p.resource_profile
       FROM server_sessions s
@@ -50,14 +74,14 @@ serversApp.get('/active', async (c) => {
       return c.json({ session: null, logs: [] });
     }
 
-    // 2. そのセッションに関連する状態遷移ログを取得 (古い順にソート)
     const { results: logs } = await db.prepare(`
-      SELECT * FROM server_status_logs
+      SELECT from_status, to_status, COALESCE(reason, detail) as reason, detail, transitioned_at, created_at
+      FROM server_status_logs
       WHERE session_id = ?
-      ORDER BY transitioned_at ASC
+      ORDER BY transitioned_at ASC, created_at ASC
     `).bind(session.id).all();
 
-    return c.json({ session: mapSessionToResponse(session), logs });
+    return c.json({ session: mapSessionToResponse(session), logs: logs || [] });
   } catch (error: any) {
     return c.json({ error: error.message }, 500);
   }
@@ -67,37 +91,43 @@ serversApp.get('/active', async (c) => {
 serversApp.post('/launch', async (c) => {
   const user = c.get('user');
   const db = c.env.DB;
-  
-  try {
-    const body = await c.req.json();
-    const { presetId } = body;
 
-    if (!presetId) {
+  try {
+    const rawBody = await c.req.json();
+    const parsed = launchSchema.safeParse(rawBody);
+    if (!parsed.success) {
       return c.json({ error: 'Preset ID is required.' }, 400);
     }
+    const { presetId } = parsed.data;
 
     // 1. すでにアクティブなセッションがある場合は自動的に終了済みに更新してリセット
     const activeSessions = await db.prepare(`
-      SELECT id FROM server_sessions
+      SELECT id, status, instance_id FROM server_sessions
       WHERE user_id = ? AND stopped_at IS NULL
     `).bind(user.id).all();
 
-    const nowDate = new Date();
-    const now = nowDate.toISOString();
+    const now = new Date().toISOString();
 
     if (activeSessions.results && activeSessions.results.length > 0) {
       for (const s of activeSessions.results as any[]) {
+        if (s.instance_id) {
+          try {
+            await cloudManager.terminate(s.instance_id as string);
+          } catch (termErr: any) {
+            console.error(`[API] Failed to terminate prior instance ${s.instance_id}: ${termErr.message}`);
+          }
+        }
         await db.prepare(`
           UPDATE server_sessions SET status = 'stopped', stopped_at = ? WHERE id = ?
         `).bind(now, s.id).run();
         await db.prepare(`
-          INSERT INTO server_status_logs (session_id, from_status, to_status, reason, transitioned_at)
-          VALUES (?, 'unknown', 'stopped', 'Auto-closed prior session for new launch', ?)
-        `).bind(s.id, now).run();
+          INSERT INTO server_status_logs (session_id, from_status, to_status, reason, detail, transitioned_at)
+          VALUES (?, ?, 'stopped', 'Auto-closed prior session for new launch', 'Auto-closed prior session for new launch', ?)
+        `).bind(s.id, s.status || 'unknown', now).run();
       }
     }
 
-    // 2. プリセットが存在するか、そしてそのユーザーのものかチェック
+    // 2. プリセットが存在し、そのユーザーのものかチェック
     const preset = await db.prepare(`
       SELECT id FROM presets WHERE id = ? AND user_id = ?
     `).bind(presetId, user.id).first();
@@ -106,14 +136,17 @@ serversApp.post('/launch', async (c) => {
       return c.json({ error: 'Preset not found.' }, 404);
     }
 
-    // 2.5. 起動回数のカウント更新（起動上限は撤廃・無制限）
+    // 2.5. BUG FIX: Added missing WHERE id = ? clause so only the current user is updated
     await db.prepare(`
-      UPDATE users SET server_launch_count_1h = COALESCE(server_launch_count_1h, 0) + 1, last_launch_reset_at = ? WHERE id = ?
+      UPDATE users
+      SET server_launch_count_1h = COALESCE(server_launch_count_1h, 0) + 1,
+          last_launch_reset_at = ?
+      WHERE id = ?
     `).bind(now, user.id).run();
 
     // 3. server_sessions テーブルに status = 'queued' でレコードをインサート
     const sessionId = crypto.randomUUID();
-    
+
     await db.prepare(`
       INSERT INTO server_sessions (id, user_id, preset_id, status, started_at)
       VALUES (?, ?, ?, 'queued', ?)
@@ -121,16 +154,16 @@ serversApp.post('/launch', async (c) => {
 
     // 4. server_status_logs テーブルに初期状態を記録
     await db.prepare(`
-      INSERT INTO server_status_logs (session_id, from_status, to_status, reason, transitioned_at)
-      VALUES (?, NULL, 'queued', 'User triggered server launch', ?)
+      INSERT INTO server_status_logs (session_id, from_status, to_status, reason, detail, transitioned_at)
+      VALUES (?, NULL, 'queued', 'User triggered server launch', 'User triggered server launch', ?)
     `).bind(sessionId, now).run();
 
-    // 5. PROVISIONING_QUEUE にメッセージを送信 (Tauriローカル起動の場合はNext.js側がTauri Rust APIを呼ぶため、クラウド版のキュー送信は不要ですが、非Tauri/本番用に残します)
-    const isDev = (c.env as any).ENVIRONMENT === 'dev';
-    if (!isDev) {
+    // 5. PROVISIONING_QUEUE にメッセージを送信
+    const isDev = c.env?.ENVIRONMENT === 'dev';
+    if (!isDev && c.env?.PROVISIONING_QUEUE) {
       await c.env.PROVISIONING_QUEUE.send({
         presetId,
-        userId: user.id
+        userId: user.id,
       });
     }
 
@@ -142,7 +175,7 @@ serversApp.post('/launch', async (c) => {
       WHERE s.id = ?
     `).bind(sessionId).first();
 
-    return c.json({ session: mapSessionToResponse(newSession), message: 'Server launch queued successfully' }, 202);
+    return c.json({ session: mapSessionToResponse(newSession), message: 'Server launch queued successfully' }, 201);
   } catch (error: any) {
     return c.json({ error: error.message }, 500);
   }
@@ -154,7 +187,6 @@ serversApp.post('/stop', async (c) => {
   const db = c.env.DB;
 
   try {
-    // 1. アクティブなセッションを取得
     const activeSession = await db.prepare(`
       SELECT * FROM server_sessions
       WHERE user_id = ? AND stopped_at IS NULL
@@ -168,7 +200,6 @@ serversApp.post('/stop', async (c) => {
     const sessionId = activeSession.id;
     const now = new Date().toISOString();
 
-    // 2. セッションの status を 'stopping' に更新し、ログを記録
     await db.prepare(`
       UPDATE server_sessions
       SET status = 'stopping'
@@ -176,11 +207,10 @@ serversApp.post('/stop', async (c) => {
     `).bind(sessionId).run();
 
     await db.prepare(`
-      INSERT INTO server_status_logs (session_id, from_status, to_status, reason, transitioned_at)
-      VALUES (?, ?, 'stopping', 'User requested server shutdown', ?)
+      INSERT INTO server_status_logs (session_id, from_status, to_status, reason, detail, transitioned_at)
+      VALUES (?, ?, 'stopping', 'User requested server shutdown', 'User requested server shutdown', ?)
     `).bind(sessionId, activeSession.status, now).run();
 
-    // 3. インスタンスIDがあれば破棄を実行
     if (activeSession.instance_id) {
       try {
         await cloudManager.terminate(activeSession.instance_id as string);
@@ -189,7 +219,6 @@ serversApp.post('/stop', async (c) => {
       }
     }
 
-    // 4. 停止完了（stopped）にする
     await db.prepare(`
       UPDATE server_sessions
       SET status = 'stopped', stopped_at = ?
@@ -197,8 +226,8 @@ serversApp.post('/stop', async (c) => {
     `).bind(now, sessionId).run();
 
     await db.prepare(`
-      INSERT INTO server_status_logs (session_id, from_status, to_status, reason, transitioned_at)
-      VALUES (?, 'stopping', 'stopped', 'Server stopped successfully', ?)
+      INSERT INTO server_status_logs (session_id, from_status, to_status, reason, detail, transitioned_at)
+      VALUES (?, 'stopping', 'stopped', 'Server stopped successfully', 'Server stopped successfully', ?)
     `).bind(sessionId, now).run();
 
     return c.json({ message: 'Server shutdown completed successfully' });
@@ -207,25 +236,40 @@ serversApp.post('/stop', async (c) => {
   }
 });
 
-// GET /api/servers/active/mods - 起動中サーバーの全MOD一括返却（同期MOD用）
+// GET /api/servers/active/mods - 起動中サーバーの全MOD一括返却 (同期MOD用)
 serversApp.get('/active/mods', async (c) => {
   const db = c.env.DB;
-  
+  const user = c.get('user');
+  const sessionIdQuery = c.req.query('session_id');
+
   try {
-    // 1. アクティブなセッションを1件取得
-    const session = await db.prepare(`
-      SELECT preset_id, status FROM server_sessions
-      WHERE stopped_at IS NULL AND status IN ('running', 'provisioning', 'queued')
-      LIMIT 1
-    `).first();
+    let session: any = null;
+    if (sessionIdQuery) {
+      session = await db.prepare(`
+        SELECT preset_id, status FROM server_sessions
+        WHERE id = ? AND stopped_at IS NULL AND status IN ('running', 'provisioning', 'queued')
+        LIMIT 1
+      `).bind(sessionIdQuery).first();
+    } else if (user?.id) {
+      session = await db.prepare(`
+        SELECT preset_id, status FROM server_sessions
+        WHERE user_id = ? AND stopped_at IS NULL AND status IN ('running', 'provisioning', 'queued')
+        LIMIT 1
+      `).bind(user.id).first();
+    } else {
+      session = await db.prepare(`
+        SELECT preset_id, status FROM server_sessions
+        WHERE stopped_at IS NULL AND status IN ('running', 'provisioning', 'queued')
+        LIMIT 1
+      `).first();
+    }
 
     if (!session) {
       return c.json({ error: 'No active server session found.' }, 404);
     }
 
-    // 2. そのセッションのプリセットに関連する全MOD（ユーザー追加 ＆ 前提自動追加含む）とダウンロードURL・Side判定フラグを取得
     const { results: mods } = await db.prepare(`
-      SELECT m.id, m.name, m.source, m.external_id, m.download_url, m.mc_version, m.loader, m.is_server_side, m.is_client_side, pm.manually_added
+      SELECT m.id, m.name, m.source, m.external_id, m.download_url, m.mc_version, m.loader, m.is_server_side, m.is_client_side
       FROM preset_mods pm
       JOIN mods m ON pm.mod_id = m.id
       WHERE pm.preset_id = ?
@@ -240,18 +284,31 @@ serversApp.get('/active/mods', async (c) => {
 // PUT /api/servers/session - Tauri Rust / Web UI からのセッション状態・PIDの更新受付
 serversApp.put('/session', async (c) => {
   const db = c.env.DB;
-  
-  try {
-    const { sessionId, status, ipAddress, instanceId, cloudProvider, javaPid, serverDataDir, reason } = await c.req.json();
+  const user = c.get('user');
 
-    if (!sessionId) {
-      return c.json({ error: 'Session ID is required.' }, 400);
+  try {
+    const rawBody = await c.req.json();
+    const parsed = sessionUpdateSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return c.json({ error: 'Invalid session update payload.', details: parsed.error.issues }, 400);
+    }
+
+    const { sessionId, status, ipAddress, instanceId, cloudProvider, javaPid, serverDataDir, reason } = parsed.data;
+
+    const current = await db.prepare(
+      'SELECT id, user_id, status FROM server_sessions WHERE id = ?'
+    ).bind(sessionId).first<any>();
+
+    if (!current) {
+      return c.json({ error: 'Session not found.' }, 404);
+    }
+
+    // Ownership verification when authenticated user is present
+    if (user?.id && current.user_id !== user.id) {
+      return c.json({ error: 'Forbidden: session belongs to another user.' }, 403);
     }
 
     const now = new Date().toISOString();
-    const current = await db.prepare(
-      'SELECT status FROM server_sessions WHERE id = ?'
-    ).bind(sessionId).first<any>();
 
     await db.prepare(`
       UPDATE server_sessions
@@ -259,10 +316,10 @@ serversApp.put('/session', async (c) => {
           stopped_at = ?
       WHERE id = ?
     `).bind(
-      status, 
-      ipAddress || null, 
-      instanceId || null, 
-      cloudProvider || 'local', 
+      status,
+      ipAddress || null,
+      instanceId || null,
+      cloudProvider || 'local',
       javaPid || null,
       serverDataDir || null,
       status === 'stopped' || status === 'failed' ? now : null,
@@ -271,9 +328,9 @@ serversApp.put('/session', async (c) => {
 
     const logReason = reason || 'Tauri local execution sync';
     await db.prepare(`
-      INSERT INTO server_status_logs (session_id, from_status, to_status, reason, transitioned_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).bind(sessionId, current?.status || null, status, logReason, now).run();
+      INSERT INTO server_status_logs (session_id, from_status, to_status, reason, detail, transitioned_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).bind(sessionId, current.status || null, status, logReason, logReason, now).run();
 
     return c.json({ ok: true });
   } catch (error: any) {
@@ -282,4 +339,3 @@ serversApp.put('/session', async (c) => {
 });
 
 export default serversApp;
-

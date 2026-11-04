@@ -265,6 +265,7 @@ struct ModListResponse {
 
 mod java_detector;
 mod zombie_detector;
+pub mod crash_analyzer;
 
 pub use java_detector::check_java_available;
 pub use zombie_detector::check_zombie_processes;
