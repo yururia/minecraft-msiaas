@@ -1889,10 +1889,52 @@ struct ModMatchKeys {
     expected_fname_lower: String,
     name_key: String,
     provider_key: String,
+    url_stem_key: String,
+}
+
+fn extract_stem_from_download_url(url: &str) -> Option<String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let without_query = trimmed.split('?').next().unwrap_or(trimmed);
+    let fname = without_query.rsplit('/').next()?;
+    let decoded = fname.replace("%20", " ").replace("%2B", "+");
+    let lower = decoded.to_ascii_lowercase();
+    if !lower.ends_with(".jar") {
+        return None;
+    }
+    let stem = decoded[..decoded.len() - 4].to_string();
+    let base = extract_base_stem_without_version(&stem);
+    if base.is_empty() {
+        None
+    } else {
+        Some(base)
+    }
+}
+
+fn expand_known_mod_alias_keys(norm_key: &str) -> &'static [&'static str] {
+    match norm_key {
+        "brassamberbattletowers" | "babt" => &["ba_bt", "babt", "brassamberbattletowers"],
+        "apothicattributes" | "attributeslib" => &["attributeslib", "apothicattributes"],
+        "ironsspells3dcastpreview" | "issponder" => &["ponder", "iss_ponder", "issponder"],
+        "curiosapi" | "curios" => &["curios", "curiosapi"],
+        "architecturyapi" | "architectury" => &["architectury", "architecturyapi"],
+        "clothconfigapi" | "clothconfig" => &["cloth_config", "clothconfig", "clothconfigapi"],
+        "p1nerosepicxcataclysm" | "p1neroec" => &["p1nero_ec", "p1neroec"],
+        "epicfightdodgeparryreward" | "dodgeparryreward" => &["dodge_parry_reward", "dodgeparryreward"],
+        "epicfightswordsoaring" | "swordsoaring" => &["sword_soaring", "swordsoaring"],
+        "epicfightavalon" => &["epic_fight_avalon", "epicfightavalon"],
+        "epicfightnightfall" | "efn" => &["efn", "epicfightnightfall"],
+        _ => &[],
+    }
 }
 
 impl ModMatchKeys {
     fn from_mod(m: &ModInfo) -> Self {
+        let url_stem_key = extract_stem_from_download_url(&m.download_url)
+            .map(|s| normalize_mod_key(&s))
+            .unwrap_or_default();
         ModMatchKeys {
             expected_fname_lower: sanitize_jar_filename(&m.name).to_ascii_lowercase(),
             name_key: normalize_mod_key(&m.name),
@@ -1901,6 +1943,7 @@ impl ModMatchKeys {
                 .as_deref()
                 .map(normalize_mod_key)
                 .unwrap_or_default(),
+            url_stem_key,
         }
     }
 }
@@ -2552,6 +2595,15 @@ fn matches_keys_with_jar(mk: &ModMatchKeys, jar: &LocalJarMetadata) -> bool {
         return true;
     }
 
+    if !mk.url_stem_key.is_empty()
+        && (mk.url_stem_key == jk.id_key
+            || mk.url_stem_key == jk.name_key
+            || jk.file_key.starts_with(&mk.url_stem_key)
+            || jk.provides_keys.iter().any(|p| *p == mk.url_stem_key))
+    {
+        return true;
+    }
+
     false
 }
 
@@ -3019,7 +3071,19 @@ fn verify_client_and_server_sandbox_blocking(
     for m in &preset_mods {
         let is_srv = m.is_server_side != Some(0);
         let is_cli = m.is_client_side != Some(0);
-        let mut keys = vec![normalize_mod_key(&m.name)];
+        let norm_name = normalize_mod_key(&m.name);
+        let mut keys = vec![norm_name.clone()];
+        for alias in expand_known_mod_alias_keys(&norm_name) {
+            keys.push((*alias).to_string());
+        }
+        if let Some(stem) = extract_stem_from_download_url(&m.download_url) {
+            let norm_stem = normalize_mod_key(&stem);
+            keys.push(stem);
+            keys.push(norm_stem.clone());
+            for alias in expand_known_mod_alias_keys(&norm_stem) {
+                keys.push((*alias).to_string());
+            }
+        }
         if let Some(ref pid) = m.provider_id {
             let clean = pid
                 .trim()
@@ -3027,8 +3091,12 @@ fn verify_client_and_server_sandbox_blocking(
                 .trim_start_matches("local-")
                 .trim_start_matches("local:")
                 .to_string();
+            let norm_clean = normalize_mod_key(&clean);
             keys.push(clean.clone());
-            keys.push(normalize_mod_key(&clean));
+            keys.push(norm_clean.clone());
+            for alias in expand_known_mod_alias_keys(&norm_clean) {
+                keys.push((*alias).to_string());
+            }
             if clean == "fabric-api" || m.name.to_ascii_lowercase().contains("fabric api") {
                 keys.push("fabric-api".to_string());
                 keys.push("fabric".to_string());

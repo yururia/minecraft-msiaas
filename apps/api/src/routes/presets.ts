@@ -931,25 +931,25 @@ presetsApp.post('/:id/resolve-missing', async (c) => {
     const failedSearchModIds: string[] = [];
 
     // A. 既存MODの download_url 解決
-    // ※注意: 200個以上のローカルZIP MOD全件に対して外部API検索を実行すると100秒以上かかり
-    //   サブリクエスト上限やレートリミットで500エラーになるため、
-    //   「本物の外部IDを持つMOD」かつ「requestedModIdsに明示指定されたもの」または最大3件のみに限定する。
+    const resolvedExistingIds = new Set<string>();
     const targetExistingMods = currentMods.filter((m: any) => {
       const extId = String(m.external_id || '');
       const isLocalJar = extId.startsWith('local:') || extId.startsWith('local-');
       const hasUrl = Boolean(m.download_url && m.download_url.trim() !== '');
       if (hasUrl) return false;
-      // requestedModIds が指定されている場合は、その関連のみに絞る
+      if (!isLocalJar) return true;
+      // ローカルJARでも requestedModIds に指定されている場合は検索対象に含める
       if (requestedModIds.length > 0) {
-        const normName = String(m.name || '').toLowerCase();
-        const normExt = extId.toLowerCase().replace(/^local[:-]/, '');
+        const normName = String(m.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normExt = extId.toLowerCase().replace(/^local[:-]/, '').replace(/[^a-z0-9]/g, '');
         return requestedModIds.some(req => {
-          const r = req.toLowerCase();
-          return r === normName || r === normExt;
+          const r = req.trim().toLowerCase();
+          const rAlpha = r.replace(/[^a-z0-9]/g, '');
+          const alias = (KNOWN_MOD_ALIASES[r] || KNOWN_MOD_ALIASES[rAlpha] || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          return rAlpha === normName || rAlpha === normExt || (alias && (alias === normName || alias === normExt));
         });
       }
-      // 全体解決の場合でもローカルJARは除外し、外部IDを持つもののみ
-      return !isLocalJar;
+      return false;
     }).slice(0, 35);
 
     for (const existing of targetExistingMods) {
@@ -970,7 +970,9 @@ presetsApp.post('/:id/resolve-missing', async (c) => {
 
         if (!foundUrl) {
           const rawSlug = foundExternalId.replace(/^local[:-]/, '');
-          const query = rawSlug || existing.name;
+          const normSlug = rawSlug.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const aliasQuery = KNOWN_MOD_ALIASES[rawSlug.toLowerCase()] || KNOWN_MOD_ALIASES[normSlug] || '';
+          const query = aliasQuery || existing.name || rawSlug;
           const searchRes = await modClient.searchMods(query, preset.mc_version, preset.loader, cfApiKey);
           if (searchRes.length > 0) {
             const bestMatch = searchRes.find(
@@ -1001,6 +1003,7 @@ presetsApp.post('/:id/resolve-missing', async (c) => {
       }
 
       if (foundUrl) {
+        resolvedExistingIds.add(existing.id);
         stmts.push(
           db.prepare(
             'UPDATE mods SET download_url = ?, source = ?, external_id = ? WHERE id = ?'
@@ -1016,36 +1019,55 @@ presetsApp.post('/:id/resolve-missing', async (c) => {
     }
 
     // B. requestedModIds（サンドボックス診断で不足と判定された前提MOD ID）を検索・追加
-    const existingSlugs = new Set(
-      currentMods.flatMap((m: any) => {
-        const ext = String(m.external_id || '').toLowerCase();
-        const extClean = ext.replace(/^local[:-]/, '');
-        const name = String(m.name || '').toLowerCase();
-        return [
-          ext,
-          extClean,
-          extClean.replace(/[^a-z0-9]/g, ''),
-          name,
-          name.replace(/\s+/g, ''),
-          name.replace(/[^a-z0-9]/g, ''),
-        ];
-      })
+    // ※ download_url が解決済みのMODのみを「解決済み既存MOD」として扱う
+    const existingResolvedSlugs = new Set(
+      currentMods
+        .filter((m: any) => Boolean(m.download_url && m.download_url.trim() !== '') || resolvedExistingIds.has(m.id))
+        .flatMap((m: any) => {
+          const ext = String(m.external_id || '').toLowerCase();
+          const extClean = ext.replace(/^local[:-]/, '');
+          const name = String(m.name || '').toLowerCase();
+          return [
+            ext,
+            extClean,
+            extClean.replace(/[^a-z0-9]/g, ''),
+            name,
+            name.replace(/\s+/g, ''),
+            name.replace(/[^a-z0-9]/g, ''),
+          ];
+        })
     );
 
     for (const rawMissingId of requestedModIds) {
       const normalized = rawMissingId.trim().toLowerCase();
+      if (!normalized) continue;
       const normAlpha = normalized.replace(/[^a-z0-9]/g, '');
       const aliasName = KNOWN_MOD_ALIASES[normalized] || KNOWN_MOD_ALIASES[normAlpha] || '';
       const aliasAlpha = aliasName ? aliasName.toLowerCase().replace(/[^a-z0-9]/g, '') : '';
 
-      // 既にプリセット内に同名や部分一致するMODが存在するか確認
-      const alreadyPresent =
-        existingSlugs.has(normalized) ||
-        existingSlugs.has(normAlpha) ||
-        (aliasAlpha && existingSlugs.has(aliasAlpha)) ||
-        Array.from(existingSlugs).some(s => s.length >= 4 && (s.includes(normAlpha) || normAlpha.includes(s)));
+      // 既にプリセット内に download_url 解決済みの同名MODが存在するか確認
+      const alreadyResolvedInPreset =
+        existingResolvedSlugs.has(normalized) ||
+        existingResolvedSlugs.has(normAlpha) ||
+        (aliasAlpha && existingResolvedSlugs.has(aliasAlpha)) ||
+        Array.from(existingResolvedSlugs).some(s => s.length >= 4 && (s.includes(normAlpha) || normAlpha.includes(s)));
 
-      if (!normalized || alreadyPresent) continue;
+      if (alreadyResolvedInPreset) {
+        const matchedExisting = currentMods.find((m: any) => {
+          const n = String(m.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const e = String(m.external_id || '').toLowerCase().replace(/^local[:-]/, '').replace(/[^a-z0-9]/g, '');
+          return n === normAlpha || e === normAlpha || (aliasAlpha && (n === aliasAlpha || e === aliasAlpha));
+        });
+        if (matchedExisting && !resolvedMods.some(r => r.name === matchedExisting.name)) {
+          resolvedMods.push({
+            modId: rawMissingId,
+            name: matchedExisting.name,
+            action: 'url_resolved',
+            downloadUrl: matchedExisting.download_url || '',
+          });
+        }
+        continue;
+      }
 
       let resolved = false;
       try {
@@ -1103,8 +1125,8 @@ presetsApp.post('/:id/resolve-missing', async (c) => {
               `).bind(presetId, newModUuid)
             );
 
-            existingSlugs.add(normalized);
-            existingSlugs.add(candidate.id.toLowerCase());
+            existingResolvedSlugs.add(normalized);
+            existingResolvedSlugs.add(candidate.id.toLowerCase());
             resolvedMods.push({
               modId: rawMissingId,
               name: candidate.title,
@@ -1119,7 +1141,9 @@ presetsApp.post('/:id/resolve-missing', async (c) => {
       }
 
       if (!resolved) {
-        failedSearchModIds.push(rawMissingId);
+        if (!failedSearchModIds.includes(rawMissingId)) {
+          failedSearchModIds.push(rawMissingId);
+        }
         // Modrinth/CurseForge で直接URLが見つからない場合でも、ローカル(.minecraft/mods や CurseForge インスタンス)にJARが存在するケースに対応するためプリセット構成に登録する
         const localExtId = `local:${normalized}`;
         const displayTitle = KNOWN_MOD_ALIASES[normalized] || KNOWN_MOD_ALIASES[normAlpha] || rawMissingId.replace(/[_-]+/g, ' ').trim();
@@ -1142,13 +1166,6 @@ presetsApp.post('/:id/resolve-missing', async (c) => {
             VALUES (?, ?, 0)
           `).bind(presetId, localModUuid)
         );
-        existingSlugs.add(normalized);
-        resolvedMods.push({
-          modId: rawMissingId,
-          name: displayTitle,
-          action: 'added',
-          downloadUrl: '',
-        });
       }
     }
 

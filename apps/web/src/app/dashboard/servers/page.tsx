@@ -543,11 +543,19 @@ function ServersContent() {
       await runSandboxDiagnosis(preLaunchModal.mcVersion, preLaunchModal.loader, updatedMods);
       
       // 自動取得できなかったMODを記録（アプリ内手動検索・D&D連携用）
-      if (res.failedSearchModIds && res.failedSearchModIds.length > 0) {
-        setFailedSearchMods(res.failedSearchModIds);
-      } else {
-        setFailedSearchMods([]);
-      }
+      const resolvedIdSet = new Set(
+        (res.resolvedMods || []).flatMap((r: any) => [
+          String(r.modId || '').toLowerCase(),
+          String(r.name || '').toLowerCase(),
+        ])
+      );
+      const stillMissing = missingIds.filter(
+        id => !resolvedIdSet.has(id.toLowerCase())
+      );
+      const combinedFailed = Array.from(
+        new Set([...(res.failedSearchModIds || []), ...stillMissing])
+      );
+      setFailedSearchMods(combinedFailed);
 
       const count = res.resolvedMods?.length || 0;
       if (count > 0) {
@@ -558,13 +566,13 @@ function ServersContent() {
         });
       }
 
-      if (res.failedSearchModIds && res.failedSearchModIds.length > 0) {
+      if (combinedFailed.length > 0) {
         alert(
-          `⚠️ 一部のMOD（${res.failedSearchModIds.join(', ')}）は外部配布サイトで見つかりませんでした。\n` +
-          `下の「🔍 アプリ内で手動検索」または「JARドラッグ＆ドロップ枠」から手動で追加してください。`
+          `⚠️ 一部のMOD（${combinedFailed.join(', ')}）は外部配布サイトで見つかりませんでした。\n` +
+          `下の「🔍 アプリ内で手動検索して追加」または「JARドラッグ＆ドロップ枠」から手動で追加してください。`
         );
       } else if (count === 0) {
-        alert('自動補完できる追加のMODはありませんでした（ローカル .minecraft/mods に存在する場合はそのまま利用可能です）。');
+        alert('自動補完できる追加のMODはありませんでした。手動で追加したい場合は「🔎 アプリ内でMODを手動検索して追加」ボタンから検索できます。');
       }
     } catch (err: any) {
       alert(`自動補完に失敗しました: ${err.message}`);
@@ -1954,7 +1962,7 @@ function ServersContent() {
                               ? 'サーバー側で必須'
                               : 'クライアント側で必須';
                           return (
-                            <span key={`${mp.mod_id}-${idx}`} style={{ fontSize: '0.78rem', background: 'rgba(0, 0, 0, 0.45)', color: '#fff', padding: '0.25rem 0.65rem', borderRadius: '4px', border: '1px solid rgba(245, 158, 11, 0.5)', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                            <span key={`${mp.mod_id}-${idx}`} style={{ fontSize: '0.78rem', background: 'rgba(0, 0, 0, 0.45)', color: '#fff', padding: '0.25rem 0.65rem', borderRadius: '4px', border: '1px solid rgba(245, 158, 11, 0.5)', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
                               <strong style={{ color: '#fde68a' }}>{mp.mod_id}</strong>{' '}
                               <span style={{ color: '#d1d5db' }}>({sideLabel} / 要求元: {mp.required_by})</span>{' '}
                               {mp.available_locally ? (
@@ -1962,6 +1970,23 @@ function ServersContent() {
                               ) : (
                                 <span style={{ color: '#38bdf8' }}>[Modrinth/CF自動取得]</span>
                               )}
+                              <button
+                                type="button"
+                                onClick={() => handleOpenInAppSearch(mp.mod_id)}
+                                title="アプリ内で別名やキーワードで手動検索して追加"
+                                style={{
+                                  background: 'rgba(56, 189, 248, 0.2)',
+                                  border: '1px solid rgba(56, 189, 248, 0.5)',
+                                  color: '#38bdf8',
+                                  borderRadius: '3px',
+                                  padding: '0.1rem 0.45rem',
+                                  cursor: 'pointer',
+                                  fontSize: '0.72rem',
+                                  marginLeft: '0.25rem',
+                                }}
+                              >
+                                🔍 手動検索
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => handleIgnoreMissingMod(mp.mod_id)}
@@ -1974,7 +1999,7 @@ function ServersContent() {
                                   padding: '0.1rem 0.4rem',
                                   cursor: 'pointer',
                                   fontSize: '0.72rem',
-                                  marginLeft: '0.25rem',
+                                  marginLeft: '0.15rem',
                                 }}
                               >
                                 ✕ 内包/不要除外
@@ -1999,81 +2024,95 @@ function ServersContent() {
                           ※このまま「サーバーを起動する」を押した場合も確認ダイアログから構成へ追加できます。
                         </span>
                       </div>
-
-                      {/* ⚠️ 外部API自動取得失敗時の救済UI（アプリ内手動検索連携 ＆ JARドラッグ＆ドロップ） */}
-                      {failedSearchMods.length > 0 && (
-                        <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: 'rgba(0, 0, 0, 0.45)', borderRadius: '6px', border: '1px solid rgba(248, 113, 113, 0.4)' }}>
-                          <div style={{ color: '#fca5a5', fontSize: '0.82rem', fontWeight: 'bold', marginBottom: '0.45rem' }}>
-                            ⚠️ 以下のMODはWeb上から自動取得できませんでした。アプリ内検索で別名を検索するか、JARを直接追加してください：
-                          </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '0.65rem' }}>
-                            {failedSearchMods.map((modName) => (
-                              <div key={modName} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255, 255, 255, 0.04)', padding: '0.35rem 0.65rem', borderRadius: '4px', flexWrap: 'wrap', gap: '0.4rem' }}>
-                                <span style={{ color: '#fde68a', fontSize: '0.8rem', fontWeight: 'bold' }}>{modName}</span>
-                                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                                  <Button
-                                    variant="secondary"
-                                    onClick={() => handleOpenInAppSearch(modName)}
-                                    style={{
-                                      padding: '0.2rem 0.65rem',
-                                      fontSize: '0.75rem',
-                                      backgroundColor: 'rgba(56, 189, 248, 0.18)',
-                                      borderColor: 'rgba(56, 189, 248, 0.45)',
-                                      color: '#38bdf8'
-                                    }}
-                                  >
-                                    🔍 アプリ内で手動検索して追加
-                                  </Button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleIgnoreMissingMod(modName)}
-                                    title="MOD本体に内包されているか、サーバー起動に不要なため不足判定から除外"
-                                    style={{
-                                      padding: '0.22rem 0.6rem',
-                                      fontSize: '0.75rem',
-                                      backgroundColor: 'rgba(156, 163, 175, 0.18)',
-                                      border: '1px solid rgba(156, 163, 175, 0.45)',
-                                      borderRadius: '4px',
-                                      color: '#d1d5db',
-                                      cursor: 'pointer',
-                                    }}
-                                  >
-                                    🚫 内包・不要として選別除外
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* 📥 手持ちのJARファイルを直接ドロップして構成に追加できる枠 */}
-                      <div
-                        onDragOver={(e) => { e.preventDefault(); setIsDraggingJar(true); }}
-                        onDragLeave={() => setIsDraggingJar(false)}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          setIsDraggingJar(false);
-                          if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                            handleDropCustomJar(e.dataTransfer.files[0]);
-                          }
-                        }}
-                        style={{
-                          marginTop: '0.65rem',
-                          border: `1px dashed ${isDraggingJar ? '#38bdf8' : 'rgba(255, 255, 255, 0.22)'}`,
-                          background: isDraggingJar ? 'rgba(56, 189, 248, 0.12)' : 'rgba(0, 0, 0, 0.25)',
-                          borderRadius: '6px',
-                          padding: '0.55rem 0.8rem',
-                          textAlign: 'center',
-                          color: isDraggingJar ? '#38bdf8' : '#9ca3af',
-                          fontSize: '0.78rem',
-                          transition: 'all 0.2s',
-                        }}
-                      >
-                        📥 手元にJARファイルがある場合は、ここにドラッグ＆ドロップしてプリセットに直接追加できます
-                      </div>
                     </div>
                   )}
+
+                  {/* ⚠️ 外部API自動取得失敗時またはDL未解決MODの救済UI（missing_prerequisitesが0件になっても消えないよう独立配置） */}
+                  {(() => {
+                    const manualTargetMods = Array.from(
+                      new Set([
+                        ...failedSearchMods,
+                        ...(sandboxReport.unresolved_mods || []),
+                      ])
+                    );
+                    if (manualTargetMods.length === 0 && sandboxReport.missing_prerequisites.length === 0) {
+                      return null;
+                    }
+                    return (
+                      <div style={{ marginBottom: '0.85rem' }}>
+                        {manualTargetMods.length > 0 && (
+                          <div style={{ padding: '0.75rem', background: 'rgba(0, 0, 0, 0.45)', borderRadius: '6px', border: '1px solid rgba(248, 113, 113, 0.4)', marginBottom: '0.65rem' }}>
+                            <div style={{ color: '#fca5a5', fontSize: '0.82rem', fontWeight: 'bold', marginBottom: '0.45rem' }}>
+                              ⚠️ 以下のMODはWeb上から自動取得できませんでした。アプリ内検索で別名を検索するか、JARを直接追加してください：
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                              {manualTargetMods.map((modName) => (
+                                <div key={modName} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255, 255, 255, 0.04)', padding: '0.35rem 0.65rem', borderRadius: '4px', flexWrap: 'wrap', gap: '0.4rem' }}>
+                                  <span style={{ color: '#fde68a', fontSize: '0.8rem', fontWeight: 'bold' }}>{modName}</span>
+                                  <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                                    <Button
+                                      variant="secondary"
+                                      onClick={() => handleOpenInAppSearch(modName)}
+                                      style={{
+                                        padding: '0.2rem 0.65rem',
+                                        fontSize: '0.75rem',
+                                        backgroundColor: 'rgba(56, 189, 248, 0.18)',
+                                        borderColor: 'rgba(56, 189, 248, 0.45)',
+                                        color: '#38bdf8'
+                                      }}
+                                    >
+                                      🔍 アプリ内で手動検索して追加
+                                    </Button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleIgnoreMissingMod(modName)}
+                                      title="MOD本体に内包されているか、サーバー起動に不要なため不足判定から除外"
+                                      style={{
+                                        padding: '0.22rem 0.6rem',
+                                        fontSize: '0.75rem',
+                                        backgroundColor: 'rgba(156, 163, 175, 0.18)',
+                                        border: '1px solid rgba(156, 163, 175, 0.45)',
+                                        borderRadius: '4px',
+                                        color: '#d1d5db',
+                                        cursor: 'pointer',
+                                      }}
+                                    >
+                                      🚫 内包・不要として選別除外
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 📥 手持ちのJARファイルを直接ドロップして構成に追加できる枠 */}
+                        <div
+                          onDragOver={(e) => { e.preventDefault(); setIsDraggingJar(true); }}
+                          onDragLeave={() => setIsDraggingJar(false)}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            setIsDraggingJar(false);
+                            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                              handleDropCustomJar(e.dataTransfer.files[0]);
+                            }
+                          }}
+                          style={{
+                            border: `1px dashed ${isDraggingJar ? '#38bdf8' : 'rgba(255, 255, 255, 0.22)'}`,
+                            background: isDraggingJar ? 'rgba(56, 189, 248, 0.12)' : 'rgba(0, 0, 0, 0.25)',
+                            borderRadius: '6px',
+                            padding: '0.55rem 0.8rem',
+                            textAlign: 'center',
+                            color: isDraggingJar ? '#38bdf8' : '#9ca3af',
+                            fontSize: '0.78rem',
+                            transition: 'all 0.2s',
+                          }}
+                        >
+                          📥 手元にJARファイルがある場合は、ここにドラッグ＆ドロップしてプリセットに直接追加できます
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* アクションボタン群 */}
                   <div style={{ display: 'flex', gap: '0.7rem', flexWrap: 'wrap' }}>
@@ -2093,6 +2132,22 @@ function ServersContent() {
                       }}
                     >
                       {resolvingMissing ? '🔄 Modrinthから検索・補完中...' : '🔍 不足している前提MOD・DLリンクを自動検索・補完'}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => handleOpenInAppSearch('')}
+                      style={{
+                        padding: '0.4rem 0.85rem',
+                        fontSize: '0.8rem',
+                        backgroundColor: 'rgba(56, 189, 248, 0.16)',
+                        borderColor: 'rgba(56, 189, 248, 0.45)',
+                        color: '#38bdf8',
+                        whiteSpace: 'normal',
+                        textAlign: 'center',
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      🔎 アプリ内でMODを手動検索して追加
                     </Button>
                     {isTauri && (
                       <Button
