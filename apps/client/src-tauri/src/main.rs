@@ -288,10 +288,11 @@ async fn get_system_memory() -> Result<u64, String> {
 
 #[command]
 fn send_server_command(session_id: String, command: String) -> Result<(), String> {
+    let clean_cmd = crash_analyzer::sanitize_server_command(&command)?;
     let mut servers = ACTIVE_SERVERS.lock().unwrap();
     if let Some(proc) = servers.get_mut(&session_id) {
         let mut stdin = &proc.java_stdin;
-        writeln!(stdin, "{}", command)
+        writeln!(stdin, "{}", clean_cmd)
             .map_err(|e| format!("Failed to send command to server: {}", e))?;
         Ok(())
     } else {

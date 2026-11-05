@@ -48,7 +48,7 @@ settingsApp.put('/', async (c) => {
     const result = appSettingsSchema.safeParse(body);
 
     if (!result.success) {
-      return c.json({ error: 'Invalid settings format.', details: result.error.errors }, 400);
+      return c.json({ error: 'Invalid settings format.', details: result.error.issues }, 400);
     }
 
     const val = result.data;

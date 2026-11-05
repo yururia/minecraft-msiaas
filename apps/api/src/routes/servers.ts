@@ -136,13 +136,36 @@ serversApp.post('/launch', async (c) => {
       return c.json({ error: 'Preset not found.' }, 404);
     }
 
-    // 2.5. BUG FIX: Added missing WHERE id = ? clause so only the current user is updated
-    await db.prepare(`
-      UPDATE users
-      SET server_launch_count_1h = COALESCE(server_launch_count_1h, 0) + 1,
-          last_launch_reset_at = ?
-      WHERE id = ?
-    `).bind(now, user.id).run();
+    // 2.5. レートリミット判定・更新（1時間あたり最大3回まで起動可能）
+    const latestUser = await db.prepare(
+      'SELECT server_launch_count_1h, last_launch_reset_at FROM users WHERE id = ?'
+    ).bind(user.id).first<{ server_launch_count_1h: number; last_launch_reset_at: string | null }>();
+
+    const currentCount = latestUser?.server_launch_count_1h ?? 0;
+    const lastResetStr = latestUser?.last_launch_reset_at;
+    const nowMs = Date.now();
+    const lastResetMs = lastResetStr ? new Date(lastResetStr.includes('T') ? lastResetStr : `${lastResetStr.replace(' ', 'T')}Z`).getTime() : 0;
+    const elapsedMs = nowMs - (isNaN(lastResetMs) ? 0 : lastResetMs);
+    const oneHourMs = 60 * 60 * 1000;
+
+    if (elapsedMs >= oneHourMs) {
+      await db.prepare(`
+        UPDATE users
+        SET server_launch_count_1h = 1,
+            last_launch_reset_at = ?
+        WHERE id = ?
+      `).bind(now, user.id).run();
+    } else if (currentCount >= 3) {
+      return c.json({
+        error: '1時間あたりのサーバー起動上限（3回）に達しました。しばらく時間をおいてから再度お試しください。'
+      }, 429);
+    } else {
+      await db.prepare(`
+        UPDATE users
+        SET server_launch_count_1h = COALESCE(server_launch_count_1h, 0) + 1
+        WHERE id = ?
+      `).bind(user.id).run();
+    }
 
     // 3. server_sessions テーブルに status = 'queued' でレコードをインサート
     const sessionId = crypto.randomUUID();
@@ -175,7 +198,7 @@ serversApp.post('/launch', async (c) => {
       WHERE s.id = ?
     `).bind(sessionId).first();
 
-    return c.json({ session: mapSessionToResponse(newSession), message: 'Server launch queued successfully' }, 201);
+    return c.json({ session: mapSessionToResponse(newSession), message: 'Server launch queued successfully' }, 202);
   } catch (error: any) {
     return c.json({ error: error.message }, 500);
   }

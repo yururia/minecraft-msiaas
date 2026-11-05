@@ -30,7 +30,7 @@ DROP TABLE server_status_logs;
 ALTER TABLE server_status_logs_new RENAME TO server_status_logs;
 CREATE INDEX IF NOT EXISTS idx_status_logs_session ON server_status_logs (session_id, transitioned_at);
 
--- 2. presets の再構築 (description, estimated_load, resource_profile の制約統一)
+-- 2. presets の再構築 (description, source, estimated_load, resource_profile の制約統一)
 CREATE TABLE IF NOT EXISTS presets_new (
   id               TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
   user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS presets_new (
   description      TEXT NOT NULL DEFAULT '',
   mc_version       TEXT NOT NULL,
   loader           TEXT NOT NULL CHECK (loader IN ('vanilla', 'forge', 'fabric', 'neoforge', 'quilt', 'paper')),
+  source           TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'zip_import')),
   estimated_load   INTEGER NOT NULL DEFAULT 0,
   resource_profile TEXT NOT NULL DEFAULT 'standard'
                      CHECK (resource_profile IN ('light', 'standard', 'heavy', 'performance')),
@@ -45,8 +46,8 @@ CREATE TABLE IF NOT EXISTS presets_new (
   updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-INSERT INTO presets_new (id, user_id, name, description, mc_version, loader, estimated_load, resource_profile, created_at, updated_at)
-SELECT id, user_id, name, '', mc_version, loader, estimated_load, resource_profile, created_at, updated_at
+INSERT INTO presets_new (id, user_id, name, description, mc_version, loader, source, estimated_load, resource_profile, created_at, updated_at)
+SELECT id, user_id, name, '', mc_version, loader, COALESCE(source, 'manual'), estimated_load, resource_profile, created_at, updated_at
 FROM presets;
 
 DROP TABLE presets;
