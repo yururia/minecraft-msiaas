@@ -35,7 +35,7 @@ CURSEFORGE_API_KEY="$2a$10$..."
 
 ### Step 3: 共通パッケージの初回ビルドとローカル D1 マイグレーション
 
-ローカルの Cloudflare D1（SQLite）データベースに初期スキーマおよびマイグレーション（`0000`〜`0003`）を適用します。必ずプロジェクトルート（`C:\Users\yasud\minecraft-msiaas`）で実行してください。
+ローカルの Cloudflare D1（SQLite）データベースに初期スキーマおよびマイグレーション（`0000`〜`0004`）を適用します。必ずプロジェクトルート（`C:\Users\yasud\minecraft-msiaas`）で実行してください。
 
 **PowerShell の場合:**
 ```powershell
@@ -185,8 +185,8 @@ MOD数が200個を超える大型Modpackでもアプリが「応答なし」に�
 | 検証内容 | コマンド | 期待される結果 |
 | :--- | :--- | :--- |
 | **1. アーキテクチャ依存関係チェック** | `pnpm lint:deps` | `✔ no dependency violations found`（違反 0 件） |
-| **2. E2E サンドボックス統合テスト** | `pnpm --filter @msiaas/sandbox simulate` | シナリオ A〜I（プロビジョニング、自動終了FSM、前提解決、ZIPインポート、`mods/*.jar` Side 仕分け、設定保存、起動レートリミット）がすべて `[SUCCESS]` |
-| **3. Tauri Rust 単体テスト** | `cargo test --manifest-path apps/client/src-tauri/Cargo.toml` | `test result: ok. 6 passed; 0 failed`（MOD 仕分け・`.jar` 正規化・クラッシュ診断・事前キー照合テスト合格） |
+| **2. E2E サンドボックス統合テスト** | `pnpm --filter @msiaas/sandbox simulate` | シナリオ A〜J（プロビジョニング、自動終了FSM、前提解決、ZIPインポート、`mods/*.jar` Side 仕分け、設定保存、クラウド起動レートリミット＆ローカル除外、サンドボックス互換診断）がすべて `[SUCCESS]` |
+| **3. Tauri Rust 単体テスト** | `cargo test --manifest-path apps/client/src-tauri/Cargo.toml` | `test result: ok. 7 passed; 0 failed`（MOD 仕分け・`.jar` 正規化・クラッシュ診断・事前キー照合・コマンドサニタイズテスト合格） |
 | **4. 共通パッケージ・Web 本番ビルド** | `pnpm --filter @msiaas/shared build; pnpm --filter @msiaas/api build; pnpm --filter @msiaas/web build` | 型エラー 0 件・Next.js 全 9 ルートビルド成功 |
 | **5. Windows デスクトップ `.exe` ビルド** | `pnpm --filter @msiaas/client build` | `Minecraft MSIaaS.exe`（単体実行用）および NSIS/MSI インストーラー生成 |
 
@@ -222,7 +222,7 @@ MOD数が200個を超える大型Modpackでもアプリが「応答なし」に�
 - **対策**: Java 21（Adoptium Temurin 21 等）をインストールするか、ダッシュボードの **「環境設定 (`/dashboard/settings`)」** の「Java 実行ファイルパス」に `C:\Program Files\Eclipse Adoptium\jdk-21...\bin\java.exe` を指定して保存してください。
 
 ### Q4. 「1時間あたりのサーバー起動上限（3回）に達しました」と表示される
-- **原因**: 不正利用防止のレートリミット（1時間3回まで）が作動しています。
+- **原因**: クラウドプロビジョニング（Oracle Cloud / AWS）に対する不正利用防止のレートリミット（1時間3回まで）が作動しています（なお、Tauri デスクトップアプリからのローカル Java サーバー起動時は自動的に制限対象外となります）。
 - **対策**: ローカル開発中にリセットしたい場合は、`apps/api` ディレクトリで以下を実行してください。
   ```powershell
   npx wrangler d1 execute msiaas-db --local --command "UPDATE users SET server_launch_count_1h = 0;"
@@ -240,6 +240,7 @@ MOD数が200個を超える大型Modpackでもアプリが「応答なし」に�
 
 | 更新日 | 版 | 更新内容・変更概要 |
 | :--- | :--- | :--- |
+| **2026-11-07** | **v1.4.0** | **・オンデマンドMOD同期＆プリセット分離アーキテクチャへの刷新**<br>- `.minecraft/mods` の完全クリーンワイプ＋プリセット構成データからのオンデマンドDL・共通キャッシュ (`mod_vault`) 自動退避<br>- サーバー実行ディレクトリのプリセット単位分離 (`servers/presets/{preset_id}`)<br>- ローカルJava起動時の1時間3回レートリミット除外<br>- CurseForge / Modrinth 混在時の並列前提MOD解決と `0004` マイグレーション整合性修正 |
 | **2026-11-01** | **v1.3.0** | **・大量MOD読み込み時のアプリ「応答なし」・フリーズ防止対策**<br>- 全Tauri重処理の `async` + `spawn_blocking` 非同期スレッド化<br>- JAR解析の並列マルチスレッド化（`scan_jars_in_dir_with_progress`）<br>- メタデータメモリキャッシュ (`JAR_META_CACHE`) 導入<br>- フロントエンド MOD 一覧の分割描画 (`ChunkedList`: 40件ずつ表示)<br>- 起動時ログのバッチ集約送信 (`server-log-batch`) と 400 行上限化<br>**・起動マニュアルの改訂**<br>- PowerShell / コマンドプロンプト両対応のコマンド記載<br>- バックエンド API 同時起動仕様・単体起動手順の明記<br>- 構文エラー（Q1）のトラブルシューティング追加 |
 | **2026-10-30** | **v1.2.0** | **・Forge Dedicated Server 対応の実装**<br>- 真の Forge サーバー展開・起動（`@forge_server_args.txt --nogui`）<br>- クライアント専用 MOD 自動除外、`config/` 同期、初回ワールドリセット機能<br>**・ZIP 前提 MOD 不足検出および確認通知機能**<br>- サーバー側/クライアント側不足判定と「構成に入れてよいか」の注意文・自動補完 |
 | **2026-10-29** | **v1.1.0** | **・MOD Side Filter 自動仕分け確認モーダル実装**<br>- ZIP インポート時およびサーバー起動前の 3 区分確認・トグル切り替え<br>- 日本語クラッシュログ自動診断エンジンの強化（Fabric/Javaバージョン/クライアントMOD混入） |

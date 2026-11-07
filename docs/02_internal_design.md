@@ -197,7 +197,22 @@ Tauri Rust バックエンドの [`should_include_mod_on_server`](file:///c:/Use
 2. **`is_server_side` フラグによる自動防御**:
    - `approved_server_mod_names` が未指定の場合でも、`mod_info.is_server_side == Some(0)`（`client_only`）の MOD は無条件でスキップします。
 3. **不要 `.jar` のクリーンアップと拡張子保証**:
-   - [`sanitize_jar_filename`](file:///c:/Users/yasud/minecraft-msiaas/apps/client/src-tauri/src/main.rs#L650-L658) により全ファイル名末尾に `.jar` を強制保証し、今回の起動対象リストに含まれない過去の古い `.jar` ファイルは起動前に `mods/` ディレクトリから自動削除します。
+   - [`sanitize_jar_filename`](file:///c:/Users/yasud/minecraft-msiaas/apps/client/src-tauri/src/main.rs) により全ファイル名末尾に `.jar` を強制保証し、今回の起動対象リストに含まれない過去の古い `.jar` ファイルは起動前に `mods/` ディレクトリから自動削除します。
+
+### 3.3 オンデマンド MOD 配置・プリセット別ディレクトリ分離・共通キャッシュ (`mod_vault`) 設計
+
+複数の Modpack プリセットを安全かつ高速に切り替えられるよう、以下のファイル・データ管理方式を採用しています。
+
+1. **`.minecraft/mods` の完全クリーンワイプ＋オンデマンド同期**:
+   - 普段はデータベース（`presets` / `preset_mods` / `mods`）に **MOD 構成メタデータ（ID・バージョン・CDN URL・Side 区分）** を保存します。
+   - 実際にそのプリセットで遊ぶ（サーバー起動または `.minecraft/mods` 一括同期）際、`.minecraft/mods` 内の既存ファイルを**全削除（クリーンワイプ）**したうえで、そのプリセットに必要な MOD 群のみをオンデマンドでダウンロード・展開します。これにより、別プリセットの MOD 残留による競合クラッシュを 100% 防止します。
+2. **共通 MOD キャッシュ (`%APPDATA%\com.msiaas.client\mod_vault\`) による自動退避と高速復元**:
+   - `.minecraft/mods` やサーバー `mods/` を全削除する直前に、フォルダ内の `.jar` ファイルを自動的に共通保管庫 `mod_vault/` へアーカイブ退避します。
+   - これにより、再ダウンロード URL を持たないローカル専用 `.jar` が消失するのを防ぐとともに、一度ダウンロードした MOD は2回目以降のプリセット切り替え時にネットワーク通信なしでミリ秒単位で即座にステージング復元されます。
+3. **プリセット単位のサーバー実行ディレクトリ分離 (`servers/presets/{preset_id}`)**:
+   - サーバーのワールドデータ（`world/`）、設定（`config/`）、MOD（`mods/`）は、MC バージョン共有ではなく `%APPDATA%\com.msiaas.client\servers\presets\{preset_id}\` にプリセット単位で完全分離して保持します（既存の `servers/{mc_version}/{loader}` からの自動マイグレーション対応）。
+4. **CurseForge / Modrinth 混在プリセットの並列前提 MOD 解決**:
+   - [`processPresetMods`](file:///c:/Users/yasud/minecraft-msiaas/apps/api/src/routes/presets.ts) は、プリセット内に CurseForge 由来と Modrinth 由来の MOD が混在している場合でも、`Promise.all` により双方の API で並列に前提 MOD を解決し、ローカル JAR は `source = 'zip_import'` として正確に識別・保管します。
 
 ---
 
@@ -274,8 +289,8 @@ stateDiagram-v2
 
 ## 6. セキュリティ・レートリミット・設定管理設計
 
-1. **サーバー起動レートリミット（1時間あたり3回制限）**:
-   - [`apps/api/src/routes/servers.ts`](file:///c:/Users/yasud/minecraft-msiaas/apps/api/src/routes/servers.ts#L99-L124) にて、`users.last_launch_reset_at` から 1 時間経過していれば `server_launch_count_1h = 1` にリセットし、1 時間以内に 3 回に達している場合は `429 Too Many Requests` を返して過剰なプロビジョニングを防止します。
+1. **サーバー起動レートリミット（クラウド起動時 1時間あたり3回制限・ローカルJava起動は無制限）**:
+   - [`apps/api/src/routes/servers.ts`](file:///c:/Users/yasud/minecraft-msiaas/apps/api/src/routes/servers.ts) にて、クラウドプロビジョニング（`oracle` / `aws`）時は `users.last_launch_reset_at` から 1 時間以内に 3 回に達している場合に `429 Too Many Requests` を返して過剰なクラウド課金・プロビジョニングを防止します。一方、ホスト PC 上で直接試行錯誤するローカル Java 起動（`cloudProvider: 'local'`）は回数制限の対象外としています。
 2. **同時起動サーバーの排他制御**:
    - D1 の部分一意インデックス `uq_session_active_user`（`ON server_sessions (user_id) WHERE stopped_at IS NULL`）および API 事前チェックにより、1 ユーザーあたり同時に起動できるサーバーを厳密に 1 台に制限します。
 3. **API キー・シークレットの分離**:
@@ -287,6 +302,7 @@ stateDiagram-v2
 
 | 更新日 | 版 | 更新内容 |
 | :--- | :--- | :--- |
+| **2026-11-07** | **v1.4.0** | `.minecraft/mods` 完全クリーンワイプ＋オンデマンドDL・共通キャッシュ (`mod_vault`) 退避設計、プリセット別サーバーディレクトリ分離 (`servers/presets/{preset_id}`)、ローカルJava起動レートリミット除外、CurseForge/Modrinth 並列前提解決の追加 |
 | **2026-11-01** | **v1.3.0** | 大量MOD処理時の非同期スレッドアーキテクチャ（`async` + `spawn_blocking`）、並列チャンクスキャン (`scan_jars_in_dir_with_progress`)、JARメタデータキャッシュ (`JAR_META_CACHE`)、ログ集約バッファリング (`server-log-batch`)、UI ChunkedList 設計の追加 |
 | **2026-10-30** | **v1.2.0** | Forge Dedicated Server 展開・起動設計、ZIP 前提 MOD 過不足照合アルゴリズム (`available_locally`, `resolve-missing`) の追加 |
 | **2026-10-29** | **v1.1.0** | MOD Side Filter アルゴリズム設計・クラッシュログ自動診断シーケンスの初版策定 |

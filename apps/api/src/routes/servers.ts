@@ -9,6 +9,7 @@ const cloudManager = new CloudManager();
 
 const launchSchema = z.object({
   presetId: z.string().min(1, 'Preset ID is required.'),
+  cloudProvider: z.enum(['local', 'oracle', 'aws']).optional(),
 });
 
 const sessionUpdateSchema = z.object({
@@ -98,7 +99,8 @@ serversApp.post('/launch', async (c) => {
     if (!parsed.success) {
       return c.json({ error: 'Preset ID is required.' }, 400);
     }
-    const { presetId } = parsed.data;
+    const { presetId, cloudProvider } = parsed.data;
+    const isLocalProvider = cloudProvider === 'local';
 
     // 1. すでにアクティブなセッションがある場合は自動的に終了済みに更新してリセット
     const activeSessions = await db.prepare(`
@@ -136,35 +138,43 @@ serversApp.post('/launch', async (c) => {
       return c.json({ error: 'Preset not found.' }, 404);
     }
 
-    // 2.5. レートリミット判定・更新（1時間あたり最大3回まで起動可能）
-    const latestUser = await db.prepare(
-      'SELECT server_launch_count_1h, last_launch_reset_at FROM users WHERE id = ?'
-    ).bind(user.id).first<{ server_launch_count_1h: number; last_launch_reset_at: string | null }>();
-
-    const currentCount = latestUser?.server_launch_count_1h ?? 0;
-    const lastResetStr = latestUser?.last_launch_reset_at;
-    const nowMs = Date.now();
-    const lastResetMs = lastResetStr ? new Date(lastResetStr.includes('T') ? lastResetStr : `${lastResetStr.replace(' ', 'T')}Z`).getTime() : 0;
-    const elapsedMs = nowMs - (isNaN(lastResetMs) ? 0 : lastResetMs);
-    const oneHourMs = 60 * 60 * 1000;
-
-    if (elapsedMs >= oneHourMs) {
-      await db.prepare(`
-        UPDATE users
-        SET server_launch_count_1h = 1,
-            last_launch_reset_at = ?
-        WHERE id = ?
-      `).bind(now, user.id).run();
-    } else if (currentCount >= 3) {
-      return c.json({
-        error: '1時間あたりのサーバー起動上限（3回）に達しました。しばらく時間をおいてから再度お試しください。'
-      }, 429);
-    } else {
+    // 2.5. レートリミット判定・更新（クラウド起動時のみ1時間あたり最大3回まで制限、ローカルJava起動時は無制限）
+    if (isLocalProvider) {
       await db.prepare(`
         UPDATE users
         SET server_launch_count_1h = COALESCE(server_launch_count_1h, 0) + 1
         WHERE id = ?
       `).bind(user.id).run();
+    } else {
+      const latestUser = await db.prepare(
+        'SELECT server_launch_count_1h, last_launch_reset_at FROM users WHERE id = ?'
+      ).bind(user.id).first<{ server_launch_count_1h: number; last_launch_reset_at: string | null }>();
+
+      const currentCount = latestUser?.server_launch_count_1h ?? 0;
+      const lastResetStr = latestUser?.last_launch_reset_at;
+      const nowMs = Date.now();
+      const lastResetMs = lastResetStr ? new Date(lastResetStr.includes('T') ? lastResetStr : `${lastResetStr.replace(' ', 'T')}Z`).getTime() : 0;
+      const elapsedMs = nowMs - (isNaN(lastResetMs) ? 0 : lastResetMs);
+      const oneHourMs = 60 * 60 * 1000;
+
+      if (elapsedMs >= oneHourMs) {
+        await db.prepare(`
+          UPDATE users
+          SET server_launch_count_1h = 1,
+              last_launch_reset_at = ?
+          WHERE id = ?
+        `).bind(now, user.id).run();
+      } else if (currentCount >= 3) {
+        return c.json({
+          error: '1時間あたりのクラウドサーバー起動上限（3回）に達しました。しばらく時間をおいてから再度お試しください。'
+        }, 429);
+      } else {
+        await db.prepare(`
+          UPDATE users
+          SET server_launch_count_1h = COALESCE(server_launch_count_1h, 0) + 1
+          WHERE id = ?
+        `).bind(user.id).run();
+      }
     }
 
     // 3. server_sessions テーブルに status = 'queued' でレコードをインサート

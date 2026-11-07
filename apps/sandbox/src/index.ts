@@ -434,7 +434,30 @@ async function main() {
   if (fourthLaunchRes.status !== 429) {
     throw new Error(`Expected 4th launch within 1 hour to return 429, got ${fourthLaunchRes.status}`);
   }
-  console.log('✔ [SUCCESS] 1時間あたり3回のサーバー起動レートリミットが正常に機能し、4回目が 429 でブロックされました！');
+
+  // ローカルJava起動 (cloudProvider: 'local') はクラウド1時間3回制限の対象外であることを検証
+  const localLaunchRes = await api.fetch(
+    new Request('http://localhost/api/servers/launch', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Mock-User-Id': 'cf-access-sub-999',
+      },
+      body: JSON.stringify({ presetId: 'preset-5678', cloudProvider: 'local' }),
+    }),
+    { ...mockEnv, ENVIRONMENT: 'dev' } as any
+  );
+  if (localLaunchRes.status !== 202) {
+    throw new Error(`Expected local Java launch to bypass cloud rate limit and return 202, got ${localLaunchRes.status}`);
+  }
+  await api.fetch(
+    new Request('http://localhost/api/servers/stop', {
+      method: 'POST',
+      headers: { 'X-Mock-User-Id': 'cf-access-sub-999' },
+    }),
+    mockEnv as any
+  );
+  console.log('✔ [SUCCESS] 1時間あたり3回のクラウドサーバー起動レートリミット（およびローカルJava起動の除外）が正常に機能しています！');
 
   // 検証J: サンドボックス互換診断（サーバー＆クライアント入室互換テスト・不足前提MOD検出）
   console.log('\n--- 検証J: サンドボックス互換診断（サーバー＆クライアント入室互換テスト・不足前提MOD検出） ---');

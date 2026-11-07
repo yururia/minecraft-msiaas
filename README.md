@@ -15,14 +15,15 @@
    - 画面一覧・**画面遷移図**（MOD Side 確認モーダル・サーバー起動前確認モーダル含む）
    - UI 外部仕様（MOD Side 3区分表示・詳細クラッシュ診断ログ表示）
    - REST API 外部インターフェース仕様一覧
-   - データベース論理設計（**ER図**：全9テーブル＋マイグレーション `0000`〜`0003`）
+   - データベース論理設計（**ER図**：全9テーブル＋マイグレーション `0000`〜`0004`）
 2. **[内部設計書 (02_internal_design.md)](file:///c:/Users/yasud/minecraft-msiaas/docs/02_internal_design.md)**
    - モノレポ依存関係ルール（Dependency Cruiser）
    - **クラス・構造体・モジュール関係図（Class Diagram）**
    - MOD Side Filter アルゴリズム設計（`parseSimpleTOML`, `classifyModSide`, `scanAndFilterMods`, `should_include_mod_on_server`）
+   - **オンデマンド MOD 配置・プリセット別ディレクトリ分離・共通キャッシュ (`mod_vault`) 設計**
    - **サーバー起動＆クラッシュログ自動診断シーケンス図**
    - 不在検知・自動停止ステートマシン設計（Cron FSM）
-   - セキュリティ・レートリミット制御（1時間3回上限・同時1台排他制御）
+   - セキュリティ・レートリミット制御（クラウド起動1時間3回上限・ローカルJava起動無制限・同時1台排他制御）
 3. **[起動・運用・テストマニュアル (03_startup_and_operations_manual.md)](file:///c:/Users/yasud/minecraft-msiaas/docs/03_startup_and_operations_manual.md)**
    - 前提ツール・初回セットアップ・D1 マイグレーション手順
    - 開発サーバー＆デスクトップアプリ一括起動（`pnpm dev`）
@@ -48,7 +49,7 @@ minecraft-msiaas/
 │   ├── 03_startup_and_operations_manual.md # 起動・運用・テストマニュアル
 │   └── archive/                       # 過去の設計ファイル・一時スクリプト保管フォルダ
 ├── infra/                             # インフラ・データベース定義
-│   ├── d1/                            # Cloudflare D1 (SQLite) マイグレーション (0000〜0003)
+│   ├── d1/                            # Cloudflare D1 (SQLite) マイグレーション (0000〜0004)
 │   ├── cloud-init/                    # クラウドVM初期化テンプレート
 │   └── server-scripts/                # サーバー運用シェルスクリプト
 ├── packages/                          # フレームワーク非依存の共通パッケージ群
@@ -74,7 +75,7 @@ minecraft-msiaas/
 # 1. 依存パッケージのインストール
 pnpm install
 
-# 2. ローカル D1 データベースのマイグレーション適用 (0000〜0003)
+# 2. ローカル D1 データベースのマイグレーション適用 (0000〜0004)
 $env:CI="true"; pnpm --filter @msiaas/api db:migrate
 
 # 3. 開発サーバー＆Tauriデスクトップアプリの一括起動 (バックエンドAPIも自動起動します)
@@ -86,7 +87,7 @@ $env:CI="true"; pnpm dev
 :: 1. 依存パッケージのインストール
 pnpm install
 
-:: 2. ローカル D1 データベースのマイグレーション適用 (0000〜0003)
+:: 2. ローカル D1 データベースのマイグレーション適用 (0000〜0004)
 set CI=true&& pnpm --filter @msiaas/api db:migrate
 
 :: 3. 開発サーバー＆Tauriデスクトップアプリの一括起動 (バックエンドAPIも自動起動します)

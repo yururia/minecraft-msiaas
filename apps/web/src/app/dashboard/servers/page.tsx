@@ -422,7 +422,7 @@ function ServersContent() {
   };
 
   // サンドボックス互換診断（サーバー起動準備 & クライアント入室テスト & .minecraft/mods 検査）
-  const runSandboxDiagnosis = async (mcVersion: string, loader: string, allMods: any[]) => {
+  const runSandboxDiagnosis = async (mcVersion: string, loader: string, allMods: any[], presetIdOverride?: string) => {
     if (isDiagnosingRef.current) return;
     isDiagnosingRef.current = true;
     try {
@@ -443,6 +443,7 @@ function ServersContent() {
             setModScanProgress(`🔍 MOD構成を解析しています... (${mappedMods.length}件)`);
             // 解析中もUIが描画・操作できるよう、Rust側はバックグラウンドスレッドで処理する
             const report = await tauri.invoke<SandboxCompatibilityReport>('verify_client_and_server_sandbox', {
+              presetId: presetIdOverride || preLaunchModal?.presetId || launchingPresetId,
               mcVersion,
               loader,
               presetMods: mappedMods,
@@ -804,6 +805,7 @@ function ServersContent() {
         failed_mods: string[];
         target_dir: string;
       }>('sync_client_mods_to_local_minecraft', {
+        presetId: preLaunchModal.presetId,
         mcVersion: preLaunchModal.mcVersion,
         loader: preLaunchModal.loader,
         clientMods: mappedMods,
@@ -892,7 +894,7 @@ function ServersContent() {
         unknownMods,
       });
 
-      await runSandboxDiagnosis(mcVer, modLoader, allMods);
+      await runSandboxDiagnosis(mcVer, modLoader, allMods, presetIdToLaunch);
     } catch (err: any) {
       // 万一プリセット詳細取得に失敗した場合はそのまま確認実行へ進む
       await executeLaunch(presetIdToLaunch, undefined);
@@ -1037,10 +1039,10 @@ function ServersContent() {
 
         setLaunchProgress(25);
         addClientLog('queued', '【2/5】データベースに起動セッションを作成しています...');
-        // DBにセッションレコードを 'queued' で作成
+        // DBにセッションレコードを 'queued' で作成（ローカルJava起動なのでクラウド回数制限から除外）
         const launchRes = await apiFetch('/api/servers/launch', {
           method: 'POST',
-          body: JSON.stringify({ presetId: presetIdToLaunch }),
+          body: JSON.stringify({ presetId: presetIdToLaunch, cloudProvider: 'local' }),
         });
         createdSession = launchRes.session;
         setLaunchProgress(30);

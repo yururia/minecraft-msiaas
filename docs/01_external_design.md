@@ -150,7 +150,7 @@ stateDiagram-v2
 | :--- | :--- | :--- | :--- | :--- |
 | `GET` | `/api/servers/active` | 現在のアクティブセッションと状態遷移ログを取得 | - | `{ session: ServerSessionResponse \| null, logs }` |
 | `GET` | `/api/servers/active/mods` | 稼働中セッションの全 MOD 一覧（`download_url`, `is_server_side`, `is_client_side` 含む）を取得 | - | `{ mods: ModInfo[] }` |
-| `POST` | `/api/servers/launch` | サーバー起動セッション作成（1時間3回レートリミット検証つき） | JSON (`{ presetId: string }`) | `202 Accepted`（上限超過時 `429 Too Many Requests`） |
+| `POST` | `/api/servers/launch` | サーバー起動セッション作成（クラウド起動時のみ1時間3回レートリミット検証、ローカルJava起動は無制限） | JSON (`{ presetId: string, cloudProvider?: 'local' \| 'oracle' \| 'aws' }`) | `202 Accepted`（上限超過時 `429 Too Many Requests`） |
 | `PUT` | `/api/servers/session` | Tauri ローカル実行エンジンからのステータス・PID・IP 同期 | JSON (`sessionId`, `status`, `ipAddress`, `javaPid`, `reason`) | `{ ok: true }` |
 | `POST` | `/api/servers/stop` | アクティブサーバーの停止と状態履歴記録 | - | `{ message }` |
 
@@ -165,7 +165,7 @@ stateDiagram-v2
 
 ## 5. データベース論理設計（ER図）
 
-`infra/d1/0000_initial.sql` 〜 `0003_add_user_settings_columns.sql` で構築される Cloudflare D1（SQLite）の全テーブル構成です。
+`infra/d1/0000_initial.sql` 〜 `0004_fix_schema_consistency.sql` で構築される Cloudflare D1（SQLite）の全テーブル構成です。
 
 ```mermaid
 erDiagram
@@ -259,6 +259,7 @@ erDiagram
         INTEGER disk_used_mb
         INTEGER java_pid "Migration 0002"
         TEXT server_data_dir "Migration 0002"
+        TEXT error_message "Migration 0002"
         TEXT started_at
         TEXT stopped_at
     }
@@ -292,10 +293,11 @@ erDiagram
 
 ---
 
-## 5. 更新履歴（Revision History）
+## 6. 更新履歴（Revision History）
 
 | 更新日 | 版 | 更新内容 |
 | :--- | :--- | :--- |
+| **2026-11-07** | **v1.4.0** | オンデマンドMOD同期（`.minecraft/mods` 全削除＋構成データからのオンデマンドDL・共通 `mod_vault` 退避）、プリセット単位のサーバーディレクトリ分離（`servers/presets/{preset_id}`）、ローカルJava起動時のレートリミット除外、CurseForge/Modrinth 並列依存解決、`0004` マイグレーション反映 |
 | **2026-11-01** | **v1.3.0** | 大量MOD読み込みフリーズ防止対策（非同期ワーカースレッド化・並列チャンクスキャン・フロントエンド分割描画 ChunkedList・ログバッチ集約） |
 | **2026-10-30** | **v1.2.0** | Forge Dedicated Server 対応、ZIP 前提 MOD 不足検出および確認通知モーダル仕様の反映 |
 | **2026-10-29** | **v1.1.0** | MOD Side Filter 3区分（サーバー追加/クライアント専用除外/判定不明トグル）仕様の追加 |

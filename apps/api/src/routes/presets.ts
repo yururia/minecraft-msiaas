@@ -33,30 +33,35 @@ async function processPresetMods(
     }
   }
 
-  // 手動追加の external_id リスト (ローカルJARは外部API解決から除外)
-  const manualExternalIds = manualMods
-    .map(m => m.external_id)
-    .filter(id => Boolean(id) && !String(id).startsWith('local:')) as string[];
+  // 手動追加MODをソース別に分類 (CurseForge と Modrinth が混在するプリセットでも両方の依存関係を並列解決する)
+  const cfManualIds = manualMods
+    .filter(m => m.source === 'curseforge' && m.external_id && !String(m.external_id).startsWith('local:'))
+    .map(m => Number(m.external_id))
+    .filter(id => !isNaN(id));
 
-  // 2. 依存関係解決 (CurseForge と Modrinth で分岐)
-  const isCurseForge = manualMods.some(m => m.source === 'curseforge');
-  let resolvedExternalIds: string[] = [];
+  const mrManualIds = manualMods
+    .filter(m => m.source !== 'curseforge' && m.external_id && !String(m.external_id).startsWith('local:'))
+    .map(m => String(m.external_id));
+
+  let resolvedCfExtIds: string[] = [];
+  let resolvedMrExtIds: string[] = [];
 
   try {
-    if (isCurseForge) {
-      const numericIds = manualExternalIds.map(Number).filter(id => !isNaN(id));
-      resolvedExternalIds = await modClient.resolveCurseForgeDependencies(
-        numericIds,
-        mcVersion,
-        loader,
-        curseForgeApiKey || ''
-      );
-    } else if (manualExternalIds.length > 0) {
-      resolvedExternalIds = await modClient.resolveDependencies(manualExternalIds, mcVersion, loader);
-    }
+    const [cfRes, mrRes] = await Promise.all([
+      cfManualIds.length > 0
+        ? modClient.resolveCurseForgeDependencies(cfManualIds, mcVersion, loader, curseForgeApiKey || '')
+        : Promise.resolve([]),
+      mrManualIds.length > 0
+        ? modClient.resolveDependencies(mrManualIds, mcVersion, loader)
+        : Promise.resolve([]),
+    ]);
+    resolvedCfExtIds = cfRes;
+    resolvedMrExtIds = mrRes;
   } catch (depErr: any) {
-    throw new Error(`前提MODの依存関係解決に失敗しました。\n・マイクラバージョン: ${mcVersion}\n・ローダー: ${loader}\n・配布ソース: ${isCurseForge ? 'CurseForge' : 'Modrinth'}\n・システムエラー: ${depErr.message}\n\n【想定される原因】:\n1. MODパック内に、指定したマイクラバージョンやローダーに非対応のMODが混入している可能性があります。\n2. 配布元（CurseForge / Modrinth）から特定の前提MODが削除されたか、非公開に設定されています。\n3. APIの接続制限または一時的なサーバーダウンが発生しています。`);
+    throw new Error(`前提MODの依存関係解決に失敗しました。\n・マイクラバージョン: ${mcVersion}\n・ローダー: ${loader}\n・システムエラー: ${depErr.message}\n\n【想定される原因】:\n1. MODパック内に、指定したマイクラバージョンやローダーに非対応のMODが混入している可能性があります。\n2. 配布元（CurseForge / Modrinth）から特定の前提MODが削除されたか、非公開に設定されています。\n3. APIの接続制限または一時的なサーバーダウンが発生しています。`);
   }
+
+  const resolvedExternalIds = Array.from(new Set([...resolvedCfExtIds, ...resolvedMrExtIds]));
 
   // 解決された前提MODがマスタDBにあるか確認、無ければAPIから取得してキャッシュ (json_each を利用し、単一バインド変数で変数上限を永久に回避)
   const resolvedModIds: string[] = [];
@@ -68,30 +73,32 @@ async function processPresetMods(
     const existingResolved = results || [];
 
     const existingExtIds = new Set(existingResolved.map((m: any) => m.external_id as string));
-    const missingExtIds = resolvedExternalIds.filter(id => !existingExtIds.has(id));
-
-    // 既存のものはIDを格納
     resolvedModIds.push(...existingResolved.map((m: any) => m.id as string));
 
-    // 未登録のものは API から取得してインサート
-    if (missingExtIds.length > 0) {
-      let fetchedMods: any[] = [];
-      if (isCurseForge) {
-        const numericMissing = missingExtIds.map(Number).filter(id => !isNaN(id));
-        fetchedMods = await modClient.fetchModsFromCurseForge(numericMissing, curseForgeApiKey || '', mcVersion, loader);
-      } else {
-        fetchedMods = await modClient.fetchMods(missingExtIds, mcVersion, loader);
-      }
+    const missingCfIds = resolvedCfExtIds.filter(id => !existingExtIds.has(id)).map(Number).filter(id => !isNaN(id));
+    const missingMrIds = resolvedMrExtIds.filter(id => !existingExtIds.has(id));
+
+    if (missingCfIds.length > 0 || missingMrIds.length > 0) {
+      const [fetchedCf, fetchedMr] = await Promise.all([
+        missingCfIds.length > 0
+          ? modClient.fetchModsFromCurseForge(missingCfIds, curseForgeApiKey || '', mcVersion, loader)
+          : Promise.resolve([]),
+        missingMrIds.length > 0
+          ? modClient.fetchMods(missingMrIds, mcVersion, loader)
+          : Promise.resolve([]),
+      ]);
+      const fetchedMods = [...fetchedCf, ...fetchedMr];
 
       for (const fetched of fetchedMods) {
         const newModId = crypto.randomUUID();
         const modLoader = (fetched as any).loader || loader;
+        const modSource = fetched.source === 'curseforge' ? 'curseforge' : 'modrinth';
         await db.prepare(`
           INSERT OR IGNORE INTO mods (id, source, external_id, name, mc_version, loader, license, download_url, is_server_side, is_client_side, is_lightweight_pack)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
         `).bind(
           newModId,
-          isCurseForge ? 'curseforge' : 'modrinth',
+          modSource,
           fetched.id,
           fetched.title,
           mcVersion,
@@ -588,7 +595,7 @@ presetsApp.post('/import', async (c) => {
         const newLocalId = crypto.randomUUID();
         await db.prepare(`
           INSERT INTO mods (id, source, external_id, name, mc_version, loader, license, download_url, is_server_side, is_client_side, is_lightweight_pack)
-          VALUES (?, 'modrinth', ?, ?, ?, ?, 'Custom JAR', '', ?, ?, 0)
+          VALUES (?, 'zip_import', ?, ?, ?, ?, 'Custom JAR', '', ?, ?, 0)
         `).bind(
           newLocalId,
           extId,
@@ -1156,7 +1163,7 @@ presetsApp.post('/:id/resolve-missing', async (c) => {
           stmts.push(
             db.prepare(`
               INSERT OR IGNORE INTO mods (id, source, external_id, name, mc_version, loader, license, download_url, is_server_side, is_client_side, is_lightweight_pack)
-              VALUES (?, 'modrinth', ?, ?, ?, ?, 'Custom JAR', '', 1, 1, 0)
+              VALUES (?, 'zip_import', ?, ?, ?, ?, 'Custom JAR', '', 1, 1, 0)
             `).bind(localModUuid, localExtId, displayTitle, preset.mc_version, preset.loader)
           );
         }

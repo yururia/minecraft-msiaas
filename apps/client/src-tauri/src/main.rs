@@ -1074,7 +1074,7 @@ fn build_java_args(allocated_memory_gb: u32, forge_arg_file: Option<&str>) -> Ve
 fn start_server_blocking(
     app_handle: tauri::AppHandle,
     session_id: String,
-    _preset_id: String,
+    preset_id: String,
     preset_name: String,
     mc_version: String,
     loader: String,
@@ -1128,11 +1128,31 @@ fn start_server_blocking(
     // Clean up any duplicate `_`-sanitized JARs in local .minecraft/mods before indexing
     clean_duplicate_sanitized_jars_in_dir(&get_local_minecraft_mods_dir());
 
-    // 1. Resolve storage directories
+    // 1. Resolve storage directories (isolated per preset_id so worlds & mods never collide between presets, while sharing mod_vault)
     let app_data = app_handle.path_resolver().app_data_dir()
         .ok_or_else(|| "Failed to resolve app data directory".to_string())?;
     
-    let server_dir = app_data.join("servers").join(&mc_version).join(&loader);
+    let server_dir = if !preset_id.trim().is_empty() && is_safe_input(&preset_id) {
+        let preset_server_dir = app_data.join("servers").join("presets").join(&preset_id);
+        let legacy_server_dir = app_data.join("servers").join(&mc_version).join(&loader);
+        // Migrate existing world/config/libraries from legacy {mc_version}/{loader} if preset_server_dir is brand new
+        if !preset_server_dir.exists() && legacy_server_dir.is_dir() {
+            let _ = fs::create_dir_all(&preset_server_dir);
+            for sub in ["world", "config", "defaultconfigs", "libraries"] {
+                let src_sub = legacy_server_dir.join(sub);
+                if src_sub.is_dir() {
+                    copy_dir_recursive_if_missing(&src_sub, &preset_server_dir.join(sub));
+                }
+            }
+            let legacy_jar = legacy_server_dir.join("minecraft_server.jar");
+            if legacy_jar.is_file() {
+                let _ = fs::copy(&legacy_jar, preset_server_dir.join("minecraft_server.jar"));
+            }
+        }
+        preset_server_dir
+    } else {
+        app_data.join("servers").join(&mc_version).join(&loader)
+    };
     fs::create_dir_all(&server_dir)
         .map_err(|e| format!("Failed to create server directory: {}", e))?;
 
@@ -1291,6 +1311,12 @@ fn start_server_blocking(
     }
 
     check_cancelled(&mut spawned_java, &mut spawned_tunnel)?;
+
+    // Archive any existing JARs in mods_dir into shared mod_vault before wiping, and also archive newly staged JARs into mod_vault
+    if let Some(vault_dir) = get_mod_vault_dir(&app_handle) {
+        archive_jars_into_vault(&mods_dir, &vault_dir);
+        archive_jars_into_vault(&server_staging_dir, &vault_dir);
+    }
 
     // Wipe existing files in mods_dir completely
     if let Ok(entries) = fs::read_dir(&mods_dir) {
@@ -1791,11 +1817,15 @@ async fn reset_all_server_data(app_handle: tauri::AppHandle) -> Result<bool, Str
     let app_data = app_handle.path_resolver().app_data_dir()
         .ok_or_else(|| "Failed to resolve app data directory".to_string())?;
     let server_dir = app_data.join("servers");
+    let vault_dir = app_data.join("mod_vault");
     // 数GBのサーバーフォルダ削除はUIスレッドを塞ぐため、バックグラウンドで実行する
     tauri::async_runtime::spawn_blocking(move || {
         if server_dir.exists() {
             fs::remove_dir_all(&server_dir)
                 .map_err(|e| format!("Failed to delete servers directory: {}", e))?;
+        }
+        if vault_dir.exists() {
+            let _ = fs::remove_dir_all(&vault_dir);
         }
         if let Ok(mut cache) = JAR_META_CACHE.lock() {
             cache.clear();
@@ -2123,6 +2153,65 @@ fn clean_duplicate_sanitized_jars_in_dir(dir: &Path) {
             }
         }
     }
+}
+
+fn get_mod_vault_dir(app_handle: &tauri::AppHandle) -> Option<PathBuf> {
+    app_handle
+        .path_resolver()
+        .app_data_dir()
+        .map(|d| d.join("mod_vault"))
+}
+
+fn archive_jars_into_vault(source_dir: &Path, vault_dir: &Path) {
+    if !source_dir.is_dir() {
+        return;
+    }
+    let _ = fs::create_dir_all(vault_dir);
+    if let Ok(entries) = fs::read_dir(source_dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_file() {
+                if let Some(fname) = p.file_name() {
+                    let fname_str = fname.to_string_lossy();
+                    if fname_str.to_ascii_lowercase().ends_with(".jar") {
+                        let dst = vault_dir.join(fname);
+                        if !dst.exists() {
+                            let _ = fs::copy(&p, &dst);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn resolve_server_mods_dir(
+    app_handle: &tauri::AppHandle,
+    preset_id: Option<&str>,
+    mc_version: &str,
+    loader: &str,
+) -> PathBuf {
+    let base = app_handle
+        .path_resolver()
+        .app_data_dir()
+        .map(|d| d.join("servers"))
+        .unwrap_or_else(|| PathBuf::from("servers"));
+
+    if let Some(pid) = preset_id {
+        let trimmed = pid.trim();
+        if !trimmed.is_empty() && is_safe_input(trimmed) {
+            let preset_mods = base.join("presets").join(trimmed).join("mods");
+            if preset_mods.is_dir() {
+                return preset_mods;
+            }
+            let legacy_mods = base.join(mc_version).join(loader).join("mods");
+            if legacy_mods.is_dir() {
+                return legacy_mods;
+            }
+            return preset_mods;
+        }
+    }
+    base.join(mc_version).join(loader).join("mods")
 }
 
 fn get_local_minecraft_mods_dir() -> PathBuf {
@@ -2664,6 +2753,16 @@ fn build_local_jar_index_selective(
         }
     }
 
+    if let Some(h) = app_handle {
+        if let Some(vault_dir) = get_mod_vault_dir(h) {
+            for jar in scan_jars_in_dir_with_progress(&vault_dir, app_handle, "共通MODキャッシュ (mod_vault)") {
+                if seen_paths.insert(jar.path.clone()) {
+                    index.push(jar);
+                }
+            }
+        }
+    }
+
     if include_curseforge {
         append_curseforge_jars_to_index(&mut index, app_handle);
     }
@@ -2998,12 +3097,13 @@ async fn test_minecraft_client_handshake(host: Option<String>, port: Option<u16>
 #[command]
 async fn verify_client_and_server_sandbox(
     app_handle: tauri::AppHandle,
+    preset_id: Option<String>,
     mc_version: String,
     loader: String,
     preset_mods: Vec<ModInfo>,
 ) -> Result<SandboxCompatibilityReport, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        verify_client_and_server_sandbox_blocking(app_handle, mc_version, loader, preset_mods)
+        verify_client_and_server_sandbox_blocking(app_handle, preset_id, mc_version, loader, preset_mods)
     })
     .await
     .map_err(|e| format!("Sandbox verification task failed: {}", e))?
@@ -3011,6 +3111,7 @@ async fn verify_client_and_server_sandbox(
 
 fn verify_client_and_server_sandbox_blocking(
     app_handle: tauri::AppHandle,
+    preset_id: Option<String>,
     mc_version: String,
     loader: String,
     preset_mods: Vec<ModInfo>,
@@ -3021,11 +3122,7 @@ fn verify_client_and_server_sandbox_blocking(
     let local_mods_dir = get_local_minecraft_mods_dir();
     clean_duplicate_sanitized_jars_in_dir(&local_mods_dir);
 
-    let server_mods_dir = app_handle
-        .path_resolver()
-        .app_data_dir()
-        .map(|d| d.join("servers").join(&mc_version).join(&loader).join("mods"))
-        .unwrap_or_else(|| PathBuf::from("servers/mods"));
+    let server_mods_dir = resolve_server_mods_dir(&app_handle, preset_id.as_deref(), &mc_version, &loader);
     clean_duplicate_sanitized_jars_in_dir(&server_mods_dir);
 
     // 各ディレクトリは1回だけ（並列・キャッシュ付きで）解析し、.minecraft/mods とサーバー mods の一覧はインデックスから切り出す
@@ -3317,13 +3414,14 @@ fn verify_client_and_server_sandbox_blocking(
 #[command]
 async fn sync_client_mods_to_local_minecraft(
     app_handle: tauri::AppHandle,
+    preset_id: Option<String>,
     mc_version: String,
     loader: String,
     client_mods: Vec<ModInfo>,
 ) -> Result<SyncClientModsResult, String> {
     // JARのコピー・ダウンロードはUIスレッドを塞がないようバックグラウンドで実行する
     tauri::async_runtime::spawn_blocking(move || {
-        sync_client_mods_to_local_minecraft_blocking(app_handle, mc_version, loader, client_mods)
+        sync_client_mods_to_local_minecraft_blocking(app_handle, preset_id, mc_version, loader, client_mods)
     })
     .await
     .map_err(|e| format!("Local mod sync task failed: {}", e))?
@@ -3331,6 +3429,7 @@ async fn sync_client_mods_to_local_minecraft(
 
 fn sync_client_mods_to_local_minecraft_blocking(
     app_handle: tauri::AppHandle,
+    preset_id: Option<String>,
     mc_version: String,
     loader: String,
     client_mods: Vec<ModInfo>,
@@ -3364,10 +3463,7 @@ fn sync_client_mods_to_local_minecraft_blocking(
         }
     }
 
-    let server_mods_dir = app_handle
-        .path_resolver()
-        .app_data_dir()
-        .map(|d| d.join("servers").join(&mc_version).join(&loader).join("mods"));
+    let server_mods_dir = Some(resolve_server_mods_dir(&app_handle, preset_id.as_deref(), &mc_version, &loader));
 
     // Stage all target client mods into a temporary folder first, then wipe .minecraft/mods completely and move staged files in
     let staging_dir = local_mods_dir
@@ -3443,6 +3539,12 @@ fn sync_client_mods_to_local_minecraft_blocking(
                 failed_mods.push(m.name);
             }
         }
+    }
+
+    // Before wiping .minecraft/mods, archive any existing local JARs and newly staged JARs into mod_vault so custom JARs are never permanently lost
+    if let Some(vault_dir) = get_mod_vault_dir(&app_handle) {
+        archive_jars_into_vault(&local_mods_dir, &vault_dir);
+        archive_jars_into_vault(&staging_dir, &vault_dir);
     }
 
     // Delete ALL existing files in .minecraft/mods before copying the staged mods in
