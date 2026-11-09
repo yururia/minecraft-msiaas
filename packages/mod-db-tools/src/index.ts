@@ -168,13 +168,28 @@ export class ModDbClient {
         });
         if (res.ok) {
           const { data: files } = (await res.json()) as { data: any[] };
-          const targetFile = files?.find((f: any) => {
-            const hasMc = f.gameVersions?.includes(mcVersion);
-            const hasLoader = f.gameVersions?.some(
-              (v: string) => v.toLowerCase() === loader.toLowerCase() || v.toLowerCase() === 'any'
-            );
-            return hasMc && hasLoader;
-          }) || files?.find((f: any) => f.gameVersions?.includes(mcVersion)) || files?.[0];
+          const targetLoaderLower = loader.toLowerCase();
+          const otherLoaders = ['fabric', 'forge', 'neoforge', 'quilt'].filter(l => l !== targetLoaderLower);
+          const isValidJar = (f: any) => !f?.fileName || String(f.fileName).toLowerCase().endsWith('.jar');
+
+          const targetFile =
+            files?.find((f: any) => {
+              if (!isValidJar(f)) return false;
+              const hasMc = f.gameVersions?.includes(mcVersion);
+              const hasLoader = f.gameVersions?.some(
+                (v: string) => v.toLowerCase() === targetLoaderLower || v.toLowerCase() === 'any'
+              );
+              return hasMc && hasLoader;
+            }) ||
+            files?.find((f: any) => {
+              if (!isValidJar(f)) return false;
+              const gv: string[] = Array.isArray(f.gameVersions) ? f.gameVersions : [];
+              const hasMc = gv.includes(mcVersion);
+              const hasConflictingLoader =
+                gv.some(v => otherLoaders.includes(v.toLowerCase())) &&
+                !gv.some(v => v.toLowerCase() === targetLoaderLower);
+              return hasMc && !hasConflictingLoader;
+            });
 
           if (targetFile) {
             const cdnUrl = resolveCurseForgeCdnUrl(targetFile);
@@ -473,9 +488,10 @@ export class ModDbClient {
         if (!downloadUrl && mcVersion && loader) {
           downloadUrl = await this.resolveDownloadUrl('curseforge', String(mod.id), mcVersion, loader, apiKey);
         }
-        if (!selectedFile) {
-          selectedFile = latestFiles.find((f: any) => f.isAvailable) || latestFiles[0];
-          if (!downloadUrl) downloadUrl = resolveCurseForgeCdnUrl(selectedFile);
+        // .zip 等の非JARファイル（シェーダーパックやリソースパック）や対象ローダー非対応のものは除外する
+        if (!downloadUrl || downloadUrl.toLowerCase().endsWith('.zip')) {
+          console.log(`[ModDbTools] Skipping incompatible or non-JAR CurseForge entry for ${mcVersion}/${loader}: ${mod.name}`);
+          continue;
         }
 
         const gameVerList: string[] = Array.isArray(selectedFile?.gameVersions) ? selectedFile.gameVersions : [];

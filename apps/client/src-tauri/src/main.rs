@@ -3195,10 +3195,16 @@ fn verify_client_and_server_sandbox_blocking(
             for alias in expand_known_mod_alias_keys(&norm_clean) {
                 keys.push((*alias).to_string());
             }
-            if clean == "fabric-api" || m.name.to_ascii_lowercase().contains("fabric api") {
+            if clean == "fabric-api"
+                || clean == "889079"
+                || clean == "306612"
+                || m.name.to_ascii_lowercase().contains("fabric api")
+                || m.name.to_ascii_lowercase().contains("forgified fabric api")
+            {
                 keys.push("fabric-api".to_string());
                 keys.push("fabric".to_string());
                 keys.push("fabricapi".to_string());
+                keys.push("forgified-fabric-api".to_string());
             }
         }
         for k in keys {
@@ -3283,39 +3289,82 @@ fn verify_client_and_server_sandbox_blocking(
         }
 
         if let Some(jar) = matched_jar {
-            for dep in &jar.dependencies {
-                let dep_norm = normalize_mod_key(dep);
-                let dep_is_client_only = is_known_client_only_mod(dep, dep);
+            let is_forge_like_preset =
+                loader.eq_ignore_ascii_case("forge") || loader.eq_ignore_ascii_case("neoforge");
+            let jar_name_lower = jar.filename.to_ascii_lowercase();
+            let is_misplaced_fabric_only_jar = is_forge_like_preset
+                && (jar.mod_id == "iris"
+                    || jar.mod_id == "sodium"
+                    || jar.mod_id == "modmenu"
+                    || jar_name_lower.contains("sodium_compatibility")
+                    || (jar_name_lower.contains("fabric")
+                        && !jar_name_lower.contains("forge")
+                        && !jar.mod_id.contains("fabric_api")
+                        && !jar.mod_id.contains("fabric-api")));
 
-                let missing_on_server = is_server
-                    && !dep_is_client_only
-                    && !server_provided_ids.contains(dep)
-                    && !server_provided_ids.contains(&dep_norm);
-                let missing_on_client = is_client
-                    && !client_provided_ids.contains(dep)
-                    && !client_provided_ids.contains(&dep_norm);
+            if !is_misplaced_fabric_only_jar {
+                for dep in &jar.dependencies {
+                    let dep_lower = dep.to_ascii_lowercase();
+                    let dep_norm = normalize_mod_key(dep);
+                    let dep_is_client_only = is_known_client_only_mod(dep, dep);
 
-                if missing_on_server || missing_on_client {
-                    let scope = if missing_on_server && missing_on_client {
-                        "both"
-                    } else if missing_on_server {
-                        "server"
-                    } else {
-                        "client"
-                    };
-                    let key = format!("{}:{}", dep_norm, scope);
-                    if seen_missing.insert(key) {
-                        let local_dep_jar = all_local_index.iter().find(|j| {
-                            j.keys.id_key == dep_norm
-                                || j.keys.provides_keys.iter().any(|p| *p == dep_norm)
-                        });
-                        missing_prerequisites.push(MissingPrerequisiteMod {
-                            mod_id: dep.clone(),
-                            required_by: m.name.clone(),
-                            scope: scope.to_string(),
-                            available_locally: local_dep_jar.is_some(),
-                            local_jar_name: local_dep_jar.map(|j| j.filename.clone()),
-                        });
+                    // Fabric API built-in submodules (e.g. fabric-resource-loader-v0, fabric-key-binding-api-v1, fabric-lifecycle-events-v1)
+                    // are satisfied whenever fabric-api or forgified-fabric-api is present, and are not standalone Forge mods.
+                    let is_fabric_api_submodule = (dep_lower.starts_with("fabric-")
+                        || dep_lower.starts_with("fabric_"))
+                        && (dep_lower.contains("-v0")
+                            || dep_lower.contains("-v1")
+                            || dep_lower.contains("-v2")
+                            || dep_lower.contains("_v0")
+                            || dep_lower.contains("_v1")
+                            || dep_lower.contains("_v2")
+                            || dep_lower.contains("api-base")
+                            || dep_lower.contains("resource-loader")
+                            || dep_lower.contains("lifecycle-events")
+                            || dep_lower.contains("key-binding")
+                            || dep_lower.contains("networking-api")
+                            || dep_lower.contains("rendering-")
+                            || dep_lower.contains("command-api"));
+
+                    if is_fabric_api_submodule {
+                        if is_forge_like_preset
+                            || server_provided_ids.contains("fabric-api")
+                            || client_provided_ids.contains("fabric-api")
+                        {
+                            continue;
+                        }
+                    }
+
+                    let missing_on_server = is_server
+                        && !dep_is_client_only
+                        && !server_provided_ids.contains(dep)
+                        && !server_provided_ids.contains(&dep_norm);
+                    let missing_on_client = is_client
+                        && !client_provided_ids.contains(dep)
+                        && !client_provided_ids.contains(&dep_norm);
+
+                    if missing_on_server || missing_on_client {
+                        let scope = if missing_on_server && missing_on_client {
+                            "both"
+                        } else if missing_on_server {
+                            "server"
+                        } else {
+                            "client"
+                        };
+                        let key = format!("{}:{}", dep_norm, scope);
+                        if seen_missing.insert(key) {
+                            let local_dep_jar = all_local_index.iter().find(|j| {
+                                j.keys.id_key == dep_norm
+                                    || j.keys.provides_keys.iter().any(|p| *p == dep_norm)
+                            });
+                            missing_prerequisites.push(MissingPrerequisiteMod {
+                                mod_id: dep.clone(),
+                                required_by: m.name.clone(),
+                                scope: scope.to_string(),
+                                available_locally: local_dep_jar.is_some(),
+                                local_jar_name: local_dep_jar.map(|j| j.filename.clone()),
+                            });
+                        }
                     }
                 }
             }

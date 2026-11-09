@@ -1107,7 +1107,39 @@ presetsApp.post('/:id/resolve-missing', async (c) => {
       const normalized = rawMissingId.trim().toLowerCase();
       if (!normalized) continue;
       const normAlpha = normalized.replace(/[^a-z0-9]/g, '');
-      const aliasName = KNOWN_MOD_ALIASES[normalized] || KNOWN_MOD_ALIASES[normAlpha] || '';
+
+      // Fabric API の内蔵サブモジュール（fabric-resource-loader-v0, fabric-key-binding-api-v1, fabric-lifecycle-events-v1 等）が
+      // 要求された場合は、単体MODではないため Forge なら Forgified Fabric API、Fabric なら Fabric API にマッピングする
+      const isFabricSubmodule =
+        (normalized.startsWith('fabric-') || normalized.startsWith('fabric_')) &&
+        (normalized.includes('-v0') ||
+          normalized.includes('-v1') ||
+          normalized.includes('-v2') ||
+          normalized.includes('api-base') ||
+          normalized.includes('resource-loader') ||
+          normalized.includes('lifecycle-events') ||
+          normalized.includes('key-binding'));
+
+      if (isFabricSubmodule) {
+        const hasFabricApiInPreset = currentMods.some((m: any) => {
+          const n = String(m.name || '').toLowerCase();
+          const e = String(m.external_id || '').toLowerCase();
+          return n.includes('fabric api') || e === '889079' || e === '306612' || e === 'p7drr8m2';
+        });
+        if (hasFabricApiInPreset) {
+          resolvedMods.push({
+            modId: rawMissingId,
+            name: 'Forgified Fabric API / Fabric API (内蔵サブモジュール)',
+            action: 'url_resolved',
+            downloadUrl: '',
+          });
+          continue;
+        }
+      }
+
+      const aliasName = isFabricSubmodule
+        ? (preset.loader === 'forge' || preset.loader === 'neoforge' ? 'Forgified Fabric API' : 'Fabric API')
+        : (KNOWN_MOD_ALIASES[normalized] || KNOWN_MOD_ALIASES[normAlpha] || '');
       const aliasAlpha = aliasName ? aliasName.toLowerCase().replace(/[^a-z0-9]/g, '') : '';
 
       // 既にプリセット内に download_url 解決済みの同名MODが存在するか確認
