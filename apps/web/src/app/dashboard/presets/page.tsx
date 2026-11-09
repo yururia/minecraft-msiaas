@@ -169,7 +169,7 @@ export default function PresetsPage() {
       });
       const newModUuid = cacheRes.id;
 
-      // 2. 現在の手動追加MODのID配列を作成
+      // 2. 現在のプリセットMODのID配列を作成（既に前提MODとして入っていた場合も手動追加として昇格・確実に反映）
       const currentManualIds = presetMods
         .filter(m => m.manually_added === 1)
         .map(m => m.id);

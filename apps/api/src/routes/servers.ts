@@ -75,14 +75,26 @@ serversApp.get('/active', async (c) => {
       return c.json({ session: null, logs: [] });
     }
 
-    const { results: logs } = await db.prepare(`
-      SELECT from_status, to_status, COALESCE(reason, detail) as reason, detail, transitioned_at, created_at
-      FROM server_status_logs
-      WHERE session_id = ?
-      ORDER BY transitioned_at ASC, created_at ASC
-    `).bind(session.id).all();
+    let logs: any[] = [];
+    try {
+      const res = await db.prepare(`
+        SELECT from_status, to_status, COALESCE(reason, detail) as reason, detail, transitioned_at, created_at
+        FROM server_status_logs
+        WHERE session_id = ?
+        ORDER BY transitioned_at ASC, created_at ASC
+      `).bind(session.id).all();
+      logs = res.results || [];
+    } catch {
+      const res = await db.prepare(`
+        SELECT from_status, to_status, reason, reason as detail, transitioned_at, transitioned_at as created_at
+        FROM server_status_logs
+        WHERE session_id = ?
+        ORDER BY transitioned_at ASC
+      `).bind(session.id).all();
+      logs = res.results || [];
+    }
 
-    return c.json({ session: mapSessionToResponse(session), logs: logs || [] });
+    return c.json({ session: mapSessionToResponse(session), logs });
   } catch (error: any) {
     return c.json({ error: error.message }, 500);
   }

@@ -40,7 +40,7 @@ async function processPresetMods(
     .filter(id => !isNaN(id));
 
   const mrManualIds = manualMods
-    .filter(m => m.source !== 'curseforge' && m.external_id && !String(m.external_id).startsWith('local:'))
+    .filter(m => m.source === 'modrinth' && m.external_id && !String(m.external_id).startsWith('local:'))
     .map(m => String(m.external_id));
 
   let resolvedCfExtIds: string[] = [];
@@ -595,7 +595,7 @@ presetsApp.post('/import', async (c) => {
         const newLocalId = crypto.randomUUID();
         await db.prepare(`
           INSERT INTO mods (id, source, external_id, name, mc_version, loader, license, download_url, is_server_side, is_client_side, is_lightweight_pack)
-          VALUES (?, 'zip_import', ?, ?, ?, ?, 'Custom JAR', '', ?, ?, 0)
+          VALUES (?, 'manual', ?, ?, ?, ?, 'Custom JAR', '', ?, ?, 0)
         `).bind(
           newLocalId,
           extId,
@@ -803,27 +803,85 @@ presetsApp.put('/:id/mods', async (c) => {
       return c.json({ error: 'Preset not found' }, 404);
     }
 
-    // 2. サーバーが起動中の場合は編集を禁止する
-    const activeSession = await db.prepare(
-      'SELECT 1 FROM server_sessions WHERE preset_id = ? AND stopped_at IS NULL'
-    ).bind(presetId).first();
+    // 2. サーバーが実際に稼働中（running / warning_sent）の場合は編集を禁止し、スタックした queued 等は自動クリーンアップする
+    const activeSessions = await db.prepare(
+      'SELECT id, status FROM server_sessions WHERE preset_id = ? AND stopped_at IS NULL'
+    ).bind(presetId).all<any>();
 
-    if (activeSession) {
-      return c.json({ error: 'このプリセットはサーバーが起動中（または準備中）のためMOD構成を変更できません。停止してからお試しください。' }, 400);
+    for (const s of activeSessions.results || []) {
+      if (s.status === 'running' || s.status === 'warning_sent') {
+        return c.json({ error: 'このプリセットは現在サーバーが稼働中のためMOD構成を変更できません。サーバーを停止してからお試しください。' }, 400);
+      } else {
+        // 起動準備のまま中断された queued / provisioning セッションは自動的にクローズしてMOD編集を許可する
+        await db.prepare(
+          "UPDATE server_sessions SET status = 'stopped', stopped_at = datetime('now') WHERE id = ?"
+        ).bind(s.id).run();
+      }
     }
 
-    // 3. 既存の中間テーブル preset_mods データを一旦削除
+    // 3. 既存の preset_mods から、どのMODが新しく手動追加されたかを特定（すでに解決済みの200+件を毎回再計算してタイムアウトするのを防ぐ）
+    const { results: existingRows } = await db.prepare(
+      'SELECT mod_id, manually_added FROM preset_mods WHERE preset_id = ?'
+    ).bind(presetId).all<{ mod_id: string; manually_added: number }>();
+    const existingManualIdSet = new Set(
+      (existingRows || []).filter(r => r.manually_added === 1).map(r => r.mod_id)
+    );
+    const newlyAddedModIds = mod_ids.filter((id: string) => !existingManualIdSet.has(id));
+    const isIncrementalAdd = newlyAddedModIds.length > 0 && newlyAddedModIds.length <= 10 && mod_ids.length > 20;
+
+    // 既存の中間テーブル preset_mods データを一旦削除
     const deleteStmt = db.prepare('DELETE FROM preset_mods WHERE preset_id = ?').bind(presetId);
 
     // 4. 新しい手動MOD配列をもとに前提MOD解決 & 軽量化パック注入
-    const { estimatedLoad, resourceProfile, stmts } = await processPresetMods(
-      db,
-      presetId,
-      preset.mc_version,
-      preset.loader,
-      mod_ids,
-      c.env.CURSEFORGE_API_KEY
-    );
+    // 大型パックへの個別MOD追加時は新規追加MODのみ依存解決を行い、既存の全MOD（前提MOD含む）を維持することで高速・確実に反映する
+    let estimatedLoad = 0;
+    let resourceProfile = 'standard';
+    let stmts: any[] = [];
+
+    if (isIncrementalAdd) {
+      const incResult = await processPresetMods(
+        db,
+        presetId,
+        preset.mc_version,
+        preset.loader,
+        newlyAddedModIds,
+        c.env.CURSEFORGE_API_KEY
+      );
+      stmts = [...incResult.stmts];
+      const scheduledIds = new Set<string>(newlyAddedModIds);
+      for (const modId of mod_ids) {
+        if (!scheduledIds.has(modId)) {
+          scheduledIds.add(modId);
+          stmts.push(
+            db.prepare('INSERT OR IGNORE INTO preset_mods (preset_id, mod_id, manually_added) VALUES (?, ?, 1)')
+              .bind(presetId, modId)
+          );
+        }
+      }
+      for (const row of existingRows || []) {
+        if (!scheduledIds.has(row.mod_id)) {
+          scheduledIds.add(row.mod_id);
+          stmts.push(
+            db.prepare('INSERT OR IGNORE INTO preset_mods (preset_id, mod_id, manually_added) VALUES (?, ?, ?)')
+              .bind(presetId, row.mod_id, row.manually_added)
+          );
+        }
+      }
+      estimatedLoad = mod_ids.length * 10;
+      resourceProfile = estimatedLoad >= 50 ? 'performance' : 'standard';
+    } else {
+      const fullResult = await processPresetMods(
+        db,
+        presetId,
+        preset.mc_version,
+        preset.loader,
+        mod_ids,
+        c.env.CURSEFORGE_API_KEY
+      );
+      estimatedLoad = fullResult.estimatedLoad;
+      resourceProfile = fullResult.resourceProfile;
+      stmts = fullResult.stmts;
+    }
 
     // 5. プリセット自体のメタデータを更新するステートメントを追加
     const updatePresetStmt = db.prepare(`
@@ -1163,7 +1221,7 @@ presetsApp.post('/:id/resolve-missing', async (c) => {
           stmts.push(
             db.prepare(`
               INSERT OR IGNORE INTO mods (id, source, external_id, name, mc_version, loader, license, download_url, is_server_side, is_client_side, is_lightweight_pack)
-              VALUES (?, 'zip_import', ?, ?, ?, ?, 'Custom JAR', '', 1, 1, 0)
+              VALUES (?, 'manual', ?, ?, ?, ?, 'Custom JAR', '', 1, 1, 0)
             `).bind(localModUuid, localExtId, displayTitle, preset.mc_version, preset.loader)
           );
         }

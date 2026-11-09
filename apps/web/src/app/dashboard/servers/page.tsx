@@ -686,14 +686,13 @@ function ServersContent() {
       });
       const newModUuid = cacheRes.id;
 
-      // 2. プリセットに追加
+      // 2. プリセットに追加（既存の全MODを送信しつつ、新しく手動選択したMODも確実に反映）
       const currentIds = preLaunchModal.allMods.map(m => m.id);
-      if (!currentIds.includes(newModUuid)) {
-        await apiFetch(`/api/presets/${preLaunchModal.presetId}/mods`, {
-          method: 'PUT',
-          body: JSON.stringify({ mod_ids: [...currentIds, newModUuid] }),
-        });
-      }
+      const nextIds = currentIds.includes(newModUuid) ? currentIds : [...currentIds, newModUuid];
+      await apiFetch(`/api/presets/${preLaunchModal.presetId}/mods`, {
+        method: 'PUT',
+        body: JSON.stringify({ mod_ids: nextIds }),
+      });
 
       // 3. プリセット情報再取得＆互換診断再実行
       const updatedPresetRes = await apiFetch(`/api/presets/${preLaunchModal.presetId}`);
@@ -738,7 +737,7 @@ function ServersContent() {
       const cacheRes = await apiFetch('/api/mods', {
         method: 'POST',
         body: JSON.stringify({
-          source: 'modrinth',
+          source: 'manual',
           external_id: localExtId,
           name: baseStem,
           mc_version: preLaunchModal.mcVersion,
@@ -751,12 +750,11 @@ function ServersContent() {
       });
 
       const currentIds = preLaunchModal.allMods.map(m => m.id);
-      if (!currentIds.includes(cacheRes.id)) {
-        await apiFetch(`/api/presets/${preLaunchModal.presetId}/mods`, {
-          method: 'PUT',
-          body: JSON.stringify({ mod_ids: [...currentIds, cacheRes.id] }),
-        });
-      }
+      const nextIds = currentIds.includes(cacheRes.id) ? currentIds : [...currentIds, cacheRes.id];
+      await apiFetch(`/api/presets/${preLaunchModal.presetId}/mods`, {
+        method: 'PUT',
+        body: JSON.stringify({ mod_ids: nextIds }),
+      });
 
       const updatedPresetRes = await apiFetch(`/api/presets/${preLaunchModal.presetId}`);
       const updatedMods = updatedPresetRes.mods || [];
