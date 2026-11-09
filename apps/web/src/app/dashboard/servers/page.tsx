@@ -253,7 +253,10 @@ function ServersContent() {
       setActiveSession(data.session);
       // 3秒ごとのポーリングでRust側のリアルタイムログ（rust-log-*）やクライアント側ログが消えないよう、
       // APIのログと結合して時系列に並べ、上限件数で切り詰める
-      const apiLogs: StatusLog[] = data.logs || [];
+      const apiLogs: StatusLog[] = (data.logs || []).map((l: any, idx: number) => ({
+        ...l,
+        id: l.id || `api-log-${l.transitioned_at || idx}-${idx}`,
+      }));
       setLogs(prev => {
         const localLogs = prev.filter(l => String(l.id).startsWith('rust-log-') || String(l.id).startsWith('client-log-'));
         if (localLogs.length === 0) return apiLogs.slice(-MAX_CONSOLE_LOGS);
@@ -1261,8 +1264,9 @@ function ServersContent() {
 
   const getLogColorAndContent = (log: StatusLog) => {
     const time = formatLogTime(log.transitioned_at);
+    const logId = String(log.id || '');
     // client-log や rust-log のIDが付いたものは reason をそのまま表示
-    if (log.id.startsWith('client-log-') || log.id.startsWith('rust-log-')) {
+    if (logId.startsWith('client-log-') || logId.startsWith('rust-log-')) {
       const reason = log.reason || '';
       let color = '#55ff55';
       if (reason.includes('❌') || reason.includes('エラー') || reason.includes('ERROR') || reason.includes('failed')) color = '#ef4444';
@@ -1755,11 +1759,11 @@ function ServersContent() {
         overflowY: 'auto'
       }}>
         {logs.length > 0 ? (
-          logs.map((log) => {
+          logs.map((log, idx) => {
             const { color, text } = getLogColorAndContent(log);
             return (
               <div 
-                key={log.id} 
+                key={log.id || `log-${idx}`} 
                 style={{ 
                   color, 
                   marginBottom: '0.6rem', 

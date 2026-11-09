@@ -78,7 +78,7 @@ serversApp.get('/active', async (c) => {
     let logs: any[] = [];
     try {
       const res = await db.prepare(`
-        SELECT from_status, to_status, COALESCE(reason, detail) as reason, detail, transitioned_at, created_at
+        SELECT id, session_id, from_status, to_status, COALESCE(reason, detail) as reason, detail, transitioned_at, created_at
         FROM server_status_logs
         WHERE session_id = ?
         ORDER BY transitioned_at ASC, created_at ASC
@@ -86,7 +86,7 @@ serversApp.get('/active', async (c) => {
       logs = res.results || [];
     } catch {
       const res = await db.prepare(`
-        SELECT from_status, to_status, reason, reason as detail, transitioned_at, transitioned_at as created_at
+        SELECT id, session_id, from_status, to_status, reason, reason as detail, transitioned_at, transitioned_at as created_at
         FROM server_status_logs
         WHERE session_id = ?
         ORDER BY transitioned_at ASC
